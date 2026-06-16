@@ -121,6 +121,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       libmysqlclient21 libreadline8 libicu74 libncurses5-dev \
       gettext-base default-mysql-client \
+      gdb \
       adduser \
     && rm -rf /var/lib/apt/lists/*
 
@@ -141,6 +142,10 @@ RUN userdel --remove ubuntu \
 COPY --chown=$USER_ID:$GROUP_ID \
      --chmod=755 \
      apps/docker/entrypoint.sh /azerothcore/entrypoint.sh
+
+COPY --chown=$USER_ID:$GROUP_ID \
+     --chmod=755 \
+     apps/docker/worldserver-gdb.sh /azerothcore/worldserver-gdb.sh
 
 USER $DOCKER_USER
 
