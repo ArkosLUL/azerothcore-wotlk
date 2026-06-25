@@ -2251,11 +2251,19 @@ uint32 Unit::CalcArmorReducedDamage(Unit const* attacker, Unit const* victim, co
             if (aurEff->GetMiscValue() & SPELL_SCHOOL_MASK_NORMAL && aurEff->IsAffectedOnSpell(spellInfo))
                 armor = std::floor(AddPct(armor, -aurEff->GetAmount()));
 
-        // Apply Player CR_ARMOR_PENETRATION rating and buffs from stances\specializations etc.
-        if (attacker->IsPlayer())
+        // Apply CR_ARMOR_PENETRATION rating and pct buffs. Players use their own;
+        // a player-owned hunter pet inherits its owner's (mod-spell-tweaks), the
+        // physical analogue of the spell-penetration inheritance below.
+        Player const* armorPenSource = attacker->ToPlayer();
+        if (!armorPenSource && attacker->IsHunterPet() && sWorld->getBoolConfig(CONFIG_HUNTER_PET_ARMOR_PEN))
+            if (Unit* owner = attacker->GetOwner())
+                if (owner->IsPlayer())
+                    armorPenSource = owner->ToPlayer();
+
+        if (armorPenSource)
         {
             float bonusPct = 0;
-            bonusPct += attacker->GetTotalAuraModifier(SPELL_AURA_MOD_ARMOR_PENETRATION_PCT, [spellInfo,attacker](AuraEffect const* aurEff)
+            bonusPct += armorPenSource->GetTotalAuraModifier(SPELL_AURA_MOD_ARMOR_PENETRATION_PCT, [spellInfo,armorPenSource](AuraEffect const* aurEff)
             {
                 if (aurEff->GetSpellInfo()->EquippedItemClass == -1)
                 {
@@ -2266,7 +2274,7 @@ uint32 Unit::CalcArmorReducedDamage(Unit const* attacker, Unit const* victim, co
                 }
                 else
                 {
-                    if (attacker->ToPlayer()->HasItemFitToSpellRequirements(aurEff->GetSpellInfo()))
+                    if (armorPenSource->HasItemFitToSpellRequirements(aurEff->GetSpellInfo()))
                         return true;
                 }
                 return false;
@@ -2281,7 +2289,7 @@ uint32 Unit::CalcArmorReducedDamage(Unit const* attacker, Unit const* victim, co
             // Cap armor penetration to this number
             maxArmorPen = std::min((armor + maxArmorPen) / 3, armor);
             // Figure out how much armor do we ignore
-            float armorPen = CalculatePct(maxArmorPen, bonusPct + attacker->ToPlayer()->GetRatingBonusValue(CR_ARMOR_PENETRATION));
+            float armorPen = CalculatePct(maxArmorPen, bonusPct + armorPenSource->GetRatingBonusValue(CR_ARMOR_PENETRATION));
             // Got the value, apply it
             armor -= std::min(armorPen, maxArmorPen);
         }
