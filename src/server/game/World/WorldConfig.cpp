@@ -525,6 +525,9 @@ void WorldConfig::BuildConfigCache()
     // mod-spell-tweaks: hunter pets inherit their owner's armor penetration (read in Unit::CalcArmorReducedDamage).
     SetConfigValue<bool>(CONFIG_HUNTER_PET_ARMOR_PEN, "SpellTweaks.HunterPetArmorPen.Enable", true);
 
+    // mod-spell-tweaks: Death Knight ghouls inherit their owner's armor penetration (read in Unit::CalcArmorReducedDamage).
+    SetConfigValue<bool>(CONFIG_DK_GHOUL_ARMOR_PEN, "SpellTweaks.DKGhoulArmorPen.Enable", true);
+
     SetConfigValue<bool>(CONFIG_MUNCHING_BLIZZLIKE, "MunchingBlizzlike.Enabled", true);
 
     SetConfigValue<bool>(CONFIG_ENABLE_DAZE, "Daze.Enabled", true);

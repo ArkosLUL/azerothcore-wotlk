@@ -2259,6 +2259,11 @@ uint32 Unit::CalcArmorReducedDamage(Unit const* attacker, Unit const* victim, co
             if (Unit* owner = attacker->GetOwner())
                 if (owner->IsPlayer())
                     armorPenSource = owner->ToPlayer();
+        // A player-owned Death Knight ghoul inherits its owner's, mirroring the hunter pet above (mod-spell-tweaks).
+        if (!armorPenSource && attacker->GetEntry() == NPC_RISEN_GHOUL && sWorld->getBoolConfig(CONFIG_DK_GHOUL_ARMOR_PEN))
+            if (Unit* owner = attacker->GetOwner())
+                if (owner->IsPlayer())
+                    armorPenSource = owner->ToPlayer();
 
         if (armorPenSource)
         {
