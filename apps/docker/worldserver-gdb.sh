@@ -34,17 +34,19 @@ fi
 #   and quit so the container exits and `restart: unless-stopped` recycles it.
 cat > "$GDB_CMD_FILE" << EOF
 set pagination off
+set confirm off
 set logging file $GDB_OUTPUT_FILE
 set logging enabled on
-set debug timestamp
 handle SIGTERM nostop noprint pass
 handle SIGINT nostop noprint pass
 handle SIGPIPE nostop noprint pass
 run
+echo \n===== inferior stopped; dumping crash backtrace =====\n
 bt
 bt full
 info threads
 thread apply all backtrace full
+echo \n===== end of crash dump =====\n
 kill
 quit
 EOF
