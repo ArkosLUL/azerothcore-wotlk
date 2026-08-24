@@ -73,8 +73,8 @@ $confsCreated   = 0
 $confsOverwritten = 0
 $confsToMerge   = New-Object System.Collections.Generic.List[string]
 
-$srcDists = Get-ChildItem -LiteralPath $ModulesDir -Recurse -Filter '*.conf.dist' -File |
-            Where-Object { $_.Directory.Name -eq 'conf' }
+$srcDists = @(Get-ChildItem -LiteralPath $ModulesDir -Recurse -Filter '*.conf.dist' -File |
+            Where-Object { $_.Directory.Name -eq 'conf' })
 
 Write-Host "Syncing $($srcDists.Count) module config(s) from '$ModulesDir' -> '$EnvDir'" -ForegroundColor Cyan
 if ($DryRun) { Write-Host "[DRY RUN] no files will be written" -ForegroundColor Yellow }
@@ -130,9 +130,9 @@ foreach ($src in $srcDists)
 # --- Orphan detection: env dists with no source module ---
 $srcNames = @{}
 foreach ($s in $srcDists) { $srcNames[$s.Name] = $true }
-$orphans = Get-ChildItem -LiteralPath $EnvDir -Filter '*.conf.dist' -File |
+$orphans = @(Get-ChildItem -LiteralPath $EnvDir -Filter '*.conf.dist' -File |
            Where-Object { -not $srcNames.ContainsKey($_.Name) } |
-           ForEach-Object { $_.Name }
+           ForEach-Object { $_.Name })
 
 # --- Stage 3: merge customized confs via existing config_merger.py ---
 $mergeInvoked = $false
