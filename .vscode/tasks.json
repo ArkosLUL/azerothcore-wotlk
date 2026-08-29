@@ -91,6 +91,33 @@
           "panel": "new"
         },
         "problemMatcher": []
+      },
+      {
+        "label": "AzerothCore: Sync module configs",
+        "type": "shell",
+        "command": "powershell -File apps/config-merger/sync-module-configs.ps1",
+        "group": "none",
+        "presentation": {
+          "reveal": "always",
+          "panel": "new"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "AzerothCore: Build + sync configs",
+        "dependsOrder": "sequence",
+        "dependsOn": [
+          "AzerothCore: Build",
+          "AzerothCore: Sync module configs"
+        ],
+        "group": {
+          "kind": "build"
+        },
+        "presentation": {
+          "reveal": "always",
+          "panel": "new"
+        },
+        "problemMatcher": []
       }
     ]
   }

@@ -51,4 +51,11 @@ fi
 
 echo "Starting $ACORE_COMPONENT..."
 
+# Opt-in: when GDB_ENABLED=1, launch the worldserver under gdb so crashes
+# produce a backtrace file in the logs volume. Any other component or value
+# falls through to the normal exec below.
+if [[ "${GDB_ENABLED:-0}" == "1" && "${1:-}" == "worldserver" ]]; then
+    exec /azerothcore/worldserver-gdb.sh
+fi
+
 exec "$@"
