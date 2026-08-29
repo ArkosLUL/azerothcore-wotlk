@@ -9169,12 +9169,10 @@ namespace Acore
                     if (_caster->IsControlledByPlayer() && !unitTarget->IsControlledByPlayer())
                         effectiveRange += unitTarget->GetCombatReach();
 
-                // Entry searches ignore height so a grounded caster still reaches a hovering
-                // target, e.g. Mimiron's Magnetic Core pulling down the Aerial Command Unit
+                // override the range check for entry area targets
                 float dist = target->GetExactDist(_position);
                 if (_targetSelectionType == TARGET_CHECK_ENTRY)
                     dist = target->GetExactDist2d(_position);
-
                 if (dist > effectiveRange)
                     return false;
             }
