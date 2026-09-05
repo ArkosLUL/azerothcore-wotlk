@@ -15,6 +15,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "LootMgr.h"
 #include "Player.h"
 #include "WorldConfig.h"
 
@@ -514,6 +515,9 @@ void WorldConfig::BuildConfigCache()
     SetConfigValue<float>(CONFIG_OUTDOOR_PVP_CAPTURE_RATE, "OutdoorPvPCaptureRate", 1.0f);
 
     SetConfigValue<uint32>(CONFIG_LOOT_NEED_BEFORE_GREED_ILVL_RESTRICTION, "LootNeedBeforeGreedILvlRestriction", 70);
+
+    SetConfigValue<uint32>(CONFIG_MAX_LOOT_ITEMS, "MaxLootItems", 18, ConfigValueCache::Reloadable::Yes,
+        [](uint32 const& value) { return value >= 1 && value <= MAX_NR_LOOT_ITEMS; }, "1-32");
 
     SetConfigValue<bool>(CONFIG_PLAYER_SETTINGS_ENABLED, "EnablePlayerSettings", 0);
 

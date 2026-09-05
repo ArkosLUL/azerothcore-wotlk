@@ -42,6 +42,7 @@
 #include "ScriptMgr.h"
 #include "Transport.h"
 #include "Warden.h"
+#include "World.h"
 #include <algorithm>
 #include <fstream>
 #include <map>
@@ -1680,7 +1681,7 @@ public:
         LootStore const& store, Player* player, std::string const& type, uint32 lootId)
     {
         loot.clear();
-        loot.items.reserve(MAX_NR_LOOT_ITEMS);
+        loot.items.reserve(sWorld->getIntConfig(CONFIG_MAX_LOOT_ITEMS));
         loot.quest_items.reserve(MAX_NR_QUEST_ITEMS);
         tab->Process(loot, store, LOOT_MODE_DEFAULT, player);
 
