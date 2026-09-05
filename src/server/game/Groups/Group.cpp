@@ -1182,7 +1182,13 @@ void Group::GroupLoot(Loot* loot, WorldObject* pLootedObject)
 
                 loot->items[itemSlot].is_blocked = true;
 
-                // If there is any "auto pass", broadcast the pass now.
+                bool const rollStarted = r->totalPass != r->totalPlayersRolling;
+
+                // A roll result announced before SMSG_LOOT_START_ROLL cannot be attributed to an item
+                // client-side, so the auto-passes have to go out after it.
+                if (rollStarted)
+                    SendLootStartRoll(60000, pLootedObject->GetMapId(), *r);
+
                 if (r->totalPass)
                 {
                     for (Roll::PlayerVote::const_iterator itr = r->playerVote.begin(); itr != r->playerVote.end(); ++itr)
@@ -1196,12 +1202,10 @@ void Group::GroupLoot(Loot* loot, WorldObject* pLootedObject)
                     }
                 }
 
-                if (r->totalPass == r->totalPlayersRolling)
+                if (!rollStarted)
                     delete r;
                 else
                 {
-                    SendLootStartRoll(60000, pLootedObject->GetMapId(), *r);
-
                     RollId.push_back(r);
 
                     if (Creature* creature = pLootedObject->ToCreature())
