@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Raise the loot-slot limit of a WoW 3.3.5a (build 12340) client from 18 to 32.
 
-The client stores loot in a fixed 18-entry global array and uses the slot number the
-server sends as a direct index into it, so a 19th slot corrupts whatever follows the
-array. The array ends exactly where the next global begins, so there is no room to grow
-it in place; this patcher appends an uninitialised section to hold a larger copy and
-repoints every reference at it.
+The client holds loot in two parallel 18-slot global arrays and uses the slot number the
+server sends as a direct index into both:
 
-Everything is located by byte pattern and derived from the file, not by hardcoded
-addresses, so the patch also applies to a client carrying unrelated modifications.
+  records  18 x 0x18  the slots the loot packet is parsed into, reached through six
+                      bounds-checked field accessors that call a fatal assert out of range
+  display  18 x 0x20  a cache the loot frame reads, filled by copying from the records
+
+Both end exactly where the next global begins, so neither can grow in place. This patcher
+appends an uninitialised section holding a larger copy of each, repoints every reference,
+and raises every bound.
+
+Everything is located by byte pattern and derived from the file, not by hardcoded addresses,
+so the patch also applies to a client carrying unrelated modifications.
 
 Usage:
     python wow_loot32_patch.py <wow.exe> [--dry-run] [--output PATH]
@@ -22,20 +27,19 @@ import shutil
 import struct
 import sys
 
-BUILD_MARKER = b'World of WarCraft (build 12340)'
+BUILD_MARKER = b'World of WarCraft (build 12340'
 
 OLD_COUNT = 18
 NEW_COUNT = 32
-STRIDE = 0x20
 
-# The item counter is a 6-way unrolled loop, and 32 is not a multiple of 6. Allocating 36
-# entries lets it run 6 iterations unchanged; the 4 trailing slots stay zero because the
-# bound checks below still cap real writes at 32.
+# The display array's item counter is a 6-way unrolled loop, and 32 is not a multiple of 6.
+# Allocating 36 entries lets it run 6 iterations unchanged; the 4 trailing slots stay zero
+# because the bound checks still cap real writes at 32. Both arrays use the same allocation
+# count so the two stay easy to reason about.
 ALLOC_COUNT = 36
 
-OLD_SIZE = OLD_COUNT * STRIDE      # 0x240
-NEW_SIZE = NEW_COUNT * STRIDE      # 0x400
-ALLOC_SIZE = ALLOC_COUNT * STRIDE  # 0x480
+DISPLAY_STRIDE = 0x20
+RECORDS_STRIDE = 0x18
 
 SECTION_NAME = b'.lootx'
 SECTION_CHARS = 0xC0000080  # uninitialised data | read | write
@@ -96,13 +100,6 @@ class PE:
                 return s
         return None
 
-    def va_to_off(self, va):
-        rva = va - self.image_base
-        for s in self.sections():
-            if s['rsize'] and s['vaddr'] <= rva < s['vaddr'] + s['rsize']:
-                return s['rptr'] + (rva - s['vaddr'])
-        raise PatchError('VA %#x is not backed by raw data' % va)
-
     def off_to_va(self, off):
         for s in self.sections():
             if s['rsize'] and s['rptr'] <= off < s['rptr'] + s['rsize']:
@@ -144,18 +141,21 @@ def find_one(pattern, buf, what):
     return hits[0]
 
 
-def locate_array(pe):
-    """Derive the loot array base from two independent anchors and cross-check them.
+def text_bytes(pe):
+    t = pe.section(b'.text')
+    if t is None:
+        raise PatchError('no .text section')
+    return t['rptr'], t['rptr'] + t['rsize']
+
+
+def locate_display(pe, lo, hi):
+    """Derive the display array base from two independent anchors that must agree.
 
     Anchor 1 is Script_GetLootSlotInfo:
         lea eax,[esi-1] / cmp eax,12h / jb ... / shl eax,5 / mov eax,[eax+base+0Ch]
     Anchor 2 is the item counter's unrolled loop prologue:
         push esi / lea ecx,[eax+2] / mov edx,base+24h / lea esi,[eax+3]
     """
-    text = pe.section(b'.text')
-    if text is None:
-        raise PatchError('no .text section')
-    lo, hi = text['rptr'], text['rptr'] + text['rsize']
     seg = bytes(pe.d[lo:hi])
 
     m1 = find_one(rb'\x8dF\xff\x83\xf8\x12\x72.', seg, 'Script_GetLootSlotInfo bound check')
@@ -169,67 +169,134 @@ def locate_array(pe):
     base2 = struct.unpack('<I', m2.group(1))[0] - 0x24
 
     if base1 != base2:
-        raise PatchError('anchors disagree on the array base: %#x vs %#x' % (base1, base2))
+        raise PatchError('display anchors disagree on the base: %#x vs %#x' % (base1, base2))
 
     # Offset of the 8d 70 03 (lea esi,[eax+3]) that sets the unrolled iteration count.
-    unroll_off = lo + m2.end() - 3
-    return base1, unroll_off, (lo, hi)
+    return base1, lo + m2.end() - 3
 
 
-def collect_patches(pe, base, unroll_off, text_range):
-    lo, hi = text_range
+def locate_records(pe, lo, hi):
+    """Derive the records array base from its six field accessors.
+
+    Each is: push ebp / mov ebp,esp / mov eax,[ebp+8] / cmp eax,12h / jae fatal
+             / lea eax,[eax+eax*2] / mov eax,[eax*8 + base + field]
+    """
+    seg = bytes(pe.d[lo:hi])
+    pat = rb'\x55\x8b\xec\x8b\x45\x08\x83\xf8\x12\x73\x0c\x8d\x04\x40\x8b\x04\xc5(....)'
+    hits = [(lo + m.start(), struct.unpack('<I', m.group(1))[0])
+            for m in re.finditer(pat, seg)]
+    if len(hits) != 6:
+        raise PatchError('expected 6 record field accessors, found %d' % len(hits))
+
+    base = min(t for _, t in hits)
+    fields = sorted(t - base for _, t in hits)
+    if fields != [0x00, 0x04, 0x08, 0x0C, 0x10, 0x14]:
+        raise PatchError('record accessors do not describe a 6-field struct: %s'
+                         % [hex(f) for f in fields])
+
+    # The immediate of each accessor's own bound check, at +8 from the signature start.
+    bound_offs = [off + 8 for off, _ in hits]
+    return base, bound_offs
+
+
+def records_refs(pe, lo, hi, base, size):
+    """References into the records array.
+
+    Every genuine one is either `push imm32` or a [reg*8 + disp32] SIB operand -- the array
+    is always indexed as index*3*8. Requiring that shape rejects dwords that only match
+    because they straddle a ModRM byte and an immediate.
+    """
+    out = []
+    for i in range(lo, hi - 4):
+        v = struct.unpack_from('<I', pe.d, i)[0]
+        if base <= v < base + size:
+            prev = pe.d[i - 1]
+            if prev == 0x68 or (prev & 0xC7) == 0xC5:
+                out.append((i, v))
+    return out
+
+
+def collect_patches(pe, lo, hi):
     data = bytes(pe.d)
     patches = []
+    layout = {}
 
-    refs = []
+    # ---- display array -------------------------------------------------
+    disp_base, unroll_off = locate_display(pe, lo, hi)
+    disp_size = OLD_COUNT * DISPLAY_STRIDE
+
+    disp_refs = []
     for i in range(lo, hi - 4):
         v = struct.unpack_from('<I', data, i)[0]
-        if base <= v < base + OLD_SIZE:
-            refs.append((i, v))
-    if not refs:
-        raise PatchError('found no references to the loot array')
+        if disp_base <= v < disp_base + disp_size:
+            disp_refs.append((i, v))
+    if not disp_refs:
+        raise PatchError('found no references to the display array')
 
-    hull_lo = min(o for o, _ in refs)
-    hull_hi = max(o for o, _ in refs) + 4
+    hull_lo = min(o for o, _ in disp_refs)
+    hull_hi = max(o for o, _ in disp_refs) + 4
     if hull_hi - hull_lo > 0x4000:
-        raise PatchError('array references are scattered over %#x bytes; refusing to guess'
+        raise PatchError('display references span %#x bytes; refusing to guess'
                          % (hull_hi - hull_lo))
 
-    for off, v in refs:
-        patches.append((off, struct.pack('<I', v), None, 'ref %+#06x' % (v - base)))
+    for off, v in disp_refs:
+        patches.append((off, struct.pack('<I', v), ('display', v - disp_base),
+                        'display ref'))
 
     margin = 0x80
     rlo, rhi = hull_lo - margin, hull_hi + margin
     seg = data[rlo:rhi]
 
-    # Bound checks: cmp r32, 18 -> cmp r32, 32. Every one must gate a conditional jump.
     for m in re.finditer(rb'\x83[\xf8-\xff]\x12', seg):
         off = rlo + m.start()
         after = seg[m.end():m.end() + 10]
-        if not (re.match(rb'[\x72\x73\x76\x77]', after) or
-                re.match(rb'\x0f[\x82\x83\x86\x87]', after) or
-                re.search(rb'[\x72\x73]', after[:6]) or
-                re.search(rb'\x0f[\x82\x83]', after[:6])):
+        if not (re.search(rb'[\x72\x73]', after[:6]) or re.search(rb'\x0f[\x82\x83]', after[:6])):
             raise PatchError('cmp r32,12h at %#x is not followed by a conditional jump'
                              % pe.off_to_va(off))
-        patches.append((off + 2, b'\x12', bytes([NEW_COUNT]), 'bound check'))
+        patches.append((off + 2, b'\x12', bytes([NEW_COUNT]), 'display bound'))
 
-    # Loop limits expressed as a byte offset into the array.
     for pat in (rb'\x3d\x40\x02\x00\x00', rb'\x81[\xf8-\xff]\x40\x02\x00\x00'):
         for m in re.finditer(pat, seg):
             imm = rlo + m.end() - 4
-            patches.append((imm, struct.pack('<I', OLD_SIZE),
-                            struct.pack('<I', NEW_SIZE), 'loop limit'))
+            patches.append((imm, struct.pack('<I', disp_size),
+                            struct.pack('<I', NEW_COUNT * DISPLAY_STRIDE), 'display loop limit'))
 
-    # memset sizes; clear the whole allocation so the spare slots stay zero.
     for m in re.finditer(rb'\x68\x40\x02\x00\x00', seg):
         imm = rlo + m.end() - 4
-        patches.append((imm, struct.pack('<I', OLD_SIZE),
-                        struct.pack('<I', ALLOC_SIZE), 'memset size'))
+        patches.append((imm, struct.pack('<I', disp_size),
+                        struct.pack('<I', ALLOC_COUNT * DISPLAY_STRIDE), 'display memset'))
 
-    patches.append((unroll_off, b'\x8d\x70\x03', b'\x8d\x70\x06', 'counter unroll'))
+    patches.append((unroll_off, b'\x8d\x70\x03', b'\x8d\x70\x06', 'display unroll'))
 
-    return patches, (hull_lo, hull_hi)
+    # ---- records array -------------------------------------------------
+    rec_base, rec_bounds = locate_records(pe, lo, hi)
+    rec_size = OLD_COUNT * RECORDS_STRIDE
+    rec_refs = records_refs(pe, lo, hi, rec_base, rec_size)
+    if len(rec_refs) < 6:
+        raise PatchError('found only %d references to the records array' % len(rec_refs))
+
+    for off, v in rec_refs:
+        patches.append((off, struct.pack('<I', v), ('records', v - rec_base), 'records ref'))
+
+    # Bounds guarding the records array: the six accessors, plus any other cmp-18 sitting
+    # next to a reference (the per-slot clear function).
+    bound_offs = set(rec_bounds)
+    for m in re.finditer(rb'\x83[\xf8-\xff]\x12', bytes(pe.d[lo:hi])):
+        off = lo + m.start()
+        if any(abs(off - r) <= 0x60 for r, _ in rec_refs):
+            bound_offs.add(off + 2)
+    for off in sorted(bound_offs):
+        patches.append((off, b'\x12', bytes([NEW_COUNT]), 'records bound'))
+
+    for m in re.finditer(rb'\x68' + struct.pack('<I', rec_size), bytes(pe.d[lo:hi])):
+        imm = lo + m.end() - 4
+        if any(abs(imm - r) <= 0x80 for r, _ in rec_refs):
+            patches.append((imm, struct.pack('<I', rec_size),
+                            struct.pack('<I', ALLOC_COUNT * RECORDS_STRIDE), 'records memset'))
+
+    layout['display'] = (disp_base, DISPLAY_STRIDE, len(disp_refs))
+    layout['records'] = (rec_base, RECORDS_STRIDE, len(rec_refs))
+    return patches, layout, (hull_lo, hull_hi)
 
 
 def main():
@@ -251,41 +318,46 @@ def main():
 
     pe = PE(raw)
     if pe.section(SECTION_NAME) is not None:
-        print('already patched (%s section present); nothing to do'
-              % SECTION_NAME.decode())
+        print('already patched (%s section present); nothing to do' % SECTION_NAME.decode())
         return 0
 
-    base, unroll_off, text_range = locate_array(pe)
-    print('loot array %#x .. %#x  (%d entries x %#x)'
-          % (base, base + OLD_SIZE, OLD_COUNT, STRIDE))
+    lo, hi = text_bytes(pe)
+    patches, layout, hull = collect_patches(pe, lo, hi)
 
-    patches, hull = collect_patches(pe, base, unroll_off, text_range)
+    for name, (base, stride, nrefs) in layout.items():
+        print('%-8s array %#x .. %#x  (%d x %#x)  %d refs'
+              % (name, base, base + OLD_COUNT * stride, OLD_COUNT, stride, nrefs))
+
     kinds = {}
     for _, _, _, what in patches:
-        kinds[what.split()[0]] = kinds.get(what.split()[0], 0) + 1
-    print('code hull  %#x .. %#x' % (pe.off_to_va(hull[0]), pe.off_to_va(hull[1])))
+        kinds[what] = kinds.get(what, 0) + 1
     print('patches    %s' % ', '.join('%s=%d' % kv for kv in sorted(kinds.items())))
 
     seen = {}
-    for off, old, new, what in patches:
+    for off, old, _, what in patches:
         for i in range(off, off + len(old)):
             if i in seen:
                 raise PatchError('patches overlap at %#x (%s vs %s)' % (i, what, seen[i]))
             seen[i] = what
 
-    new_base = pe.append_bss_section(SECTION_NAME, ALLOC_SIZE, SECTION_CHARS)
-    print('new array  %#x .. %#x  (%d entries allocated, %d usable)'
-          % (new_base, new_base + ALLOC_SIZE, ALLOC_COUNT, NEW_COUNT))
+    disp_alloc = ALLOC_COUNT * DISPLAY_STRIDE
+    rec_alloc = ALLOC_COUNT * RECORDS_STRIDE
+    sec_base = pe.append_bss_section(SECTION_NAME, disp_alloc + rec_alloc, SECTION_CHARS)
+    new_base = {'display': sec_base, 'records': sec_base + disp_alloc}
+    for name in ('display', 'records'):
+        alloc = disp_alloc if name == 'display' else rec_alloc
+        print('new %-6s %#x .. %#x  (%d entries allocated, %d usable)'
+              % (name, new_base[name], new_base[name] + alloc, ALLOC_COUNT, NEW_COUNT))
 
     for off, old, new, what in patches:
         if bytes(pe.d[off:off + len(old)]) != old:
             raise PatchError('expected %s at %#x, found %s'
                              % (old.hex(), off, bytes(pe.d[off:off + len(old)]).hex()))
-        if new is None:
-            v = struct.unpack('<I', old)[0]
-            new = struct.pack('<I', new_base + (v - base))
+        if isinstance(new, tuple):
+            which, field = new
+            new = struct.pack('<I', new_base[which] + field)
         if args.dry_run:
-            print('  %#010x  %-14s %s -> %s'
+            print('  %#010x  %-18s %s -> %s'
                   % (pe.off_to_va(off), what, old.hex(' '), new.hex(' ')))
         pe.d[off:off + len(old)] = new
 
