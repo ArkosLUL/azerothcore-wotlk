@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Raise the loot-slot limit of a WoW 3.3.5a (build 12340) client from 18 to 32.
+"""Raise the loot-slot limit of a WoW 3.3.5a (build 12340) client from 18 to --slots.
 
 The client holds loot in two parallel 18-slot global arrays and uses the slot number the
 server sends as a direct index into both:
@@ -10,13 +10,13 @@ server sends as a direct index into both:
 
 Both end exactly where the next global begins, so neither can grow in place. This patcher
 appends an uninitialised section holding a larger copy of each, repoints every reference,
-and raises every bound.
+raises every bound, and lifts the 18-item clamp in the loot packet handler.
 
 Everything is located by byte pattern and derived from the file, not by hardcoded addresses,
 so the patch also applies to a client carrying unrelated modifications.
 
 Usage:
-    python wow_loot32_patch.py <wow.exe> [--dry-run] [--output PATH]
+    python wow_loot_patch.py <wow.exe> --slots N [--dry-run] [--output PATH]
 """
 
 import argparse
@@ -30,21 +30,31 @@ import sys
 BUILD_MARKER = b'World of WarCraft (build 12340'
 
 OLD_COUNT = 18
-NEW_COUNT = 32
-
-# The display array's item counter is a 6-way unrolled loop, and 32 is not a multiple of 6.
-# Allocating 36 entries lets it run 6 iterations unchanged; the 4 trailing slots stay zero
-# because the bound checks still cap real writes at 32. Both arrays use the same allocation
-# count so the two stay easy to reason about.
-ALLOC_COUNT = 36
+# bounds are `cmp r/m32, imm8`, sign-extended, so anything past 127 would read as negative
+MAX_SLOTS = 127
 
 DISPLAY_STRIDE = 0x20
 RECORDS_STRIDE = 0x18
+
+# The display item counter is a loop unrolled 6 wide. Rounding the allocation up to a
+# multiple of 6 lets it run whole iterations; the spare trailing slots stay zero because
+# the bound checks still cap real writes at --slots.
+UNROLL = 6
 
 SECTION_NAME = b'.lootx'
 SECTION_CHARS = 0xC0000080  # uninitialised data | read | write
 
 IMAGE_SIZEOF_SECTION_HEADER = 40
+
+# push ebp / mov ebp,esp / mov eax,[ebp+8] / cmp eax,bound / jae fatal
+# / lea eax,[eax+eax*2] / mov eax,[eax*8 + base + field]
+RECORD_ACCESSOR = rb'\x55\x8b\xec\x8b\x45\x08\x83\xf8(.)\x73\x0c\x8d\x04\x40\x8b\x04\xc5(....)'
+
+# mov al,12h / cmp [ebp+x],al / jbe +3 / mov [ebp+x],al
+COUNT_CLAMP = rb'\xb0\x12\x38\x45(.)\x76\x03\x88\x45\1'
+
+# cmp r32,12h or cmp dword [ebp+x],12h
+SLOT_BOUND = rb'\x83(?:[\xf8-\xff]|\x7d.)\x12'
 
 
 class PatchError(Exception):
@@ -123,8 +133,7 @@ class PE:
 
         struct.pack_into('<8s', self.d, hdr, name)
         struct.pack_into('<IIII', self.d, hdr + 8, vsize, rva, 0, 0)
-        # PointerToRelocations, PointerToLinenumbers, NumberOf{Relocations,Linenumbers},
-        # Characteristics -- 16 bytes, so Characteristics lands at hdr+36.
+        # relocation/linenumber pointers and counts are 16 bytes, so Characteristics is hdr+36
         struct.pack_into('<IIHHI', self.d, hdr + 24, 0, 0, 0, 0, chars)
 
         struct.pack_into('<H', self.d, self.coff + 2, n + 1)
@@ -134,8 +143,12 @@ class PE:
         return self.image_base + rva
 
 
+def alloc_count(slots):
+    return -(-slots // UNROLL) * UNROLL
+
+
 def find_one(pattern, buf, what):
-    hits = list(re.finditer(pattern, buf))
+    hits = list(re.finditer(pattern, buf, re.S))
     if len(hits) != 1:
         raise PatchError('expected exactly 1 match for %s, found %d' % (what, len(hits)))
     return hits[0]
@@ -160,7 +173,7 @@ def locate_display(pe, lo, hi):
 
     m1 = find_one(rb'\x8dF\xff\x83\xf8\x12\x72.', seg, 'Script_GetLootSlotInfo bound check')
     tail = seg[m1.end():m1.end() + 24]
-    m1b = re.search(rb'\xc1\xe0\x05\x8b\x80(....)', tail)
+    m1b = re.search(rb'\xc1\xe0\x05\x8b\x80(....)', tail, re.S)
     if not m1b:
         raise PatchError('could not find the indexed load after the bound check')
     base1 = struct.unpack('<I', m1b.group(1))[0] - 0x0C
@@ -171,39 +184,35 @@ def locate_display(pe, lo, hi):
     if base1 != base2:
         raise PatchError('display anchors disagree on the base: %#x vs %#x' % (base1, base2))
 
-    # Offset of the 8d 70 03 (lea esi,[eax+3]) that sets the unrolled iteration count.
+    # offset of the 8d 70 03 (lea esi,[eax+3]) that sets the unrolled iteration count
     return base1, lo + m2.end() - 3
 
 
-def locate_records(pe, lo, hi):
-    """Derive the records array base from its six field accessors.
-
-    Each is: push ebp / mov ebp,esp / mov eax,[ebp+8] / cmp eax,12h / jae fatal
-             / lea eax,[eax+eax*2] / mov eax,[eax*8 + base + field]
-    """
+def record_accessors(pe, lo, hi):
+    """The records base, the slot bound its six field accessors share, and their bound offsets."""
     seg = bytes(pe.d[lo:hi])
-    pat = rb'\x55\x8b\xec\x8b\x45\x08\x83\xf8\x12\x73\x0c\x8d\x04\x40\x8b\x04\xc5(....)'
-    hits = [(lo + m.start(), struct.unpack('<I', m.group(1))[0])
-            for m in re.finditer(pat, seg)]
+    hits = [(lo + m.start() + 8, m.group(1)[0], struct.unpack('<I', m.group(2))[0])
+            for m in re.finditer(RECORD_ACCESSOR, seg, re.S)]
     if len(hits) != 6:
         raise PatchError('expected 6 record field accessors, found %d' % len(hits))
 
-    base = min(t for _, t in hits)
-    fields = sorted(t - base for _, t in hits)
+    base = min(t for _, _, t in hits)
+    fields = sorted(t - base for _, _, t in hits)
     if fields != [0x00, 0x04, 0x08, 0x0C, 0x10, 0x14]:
         raise PatchError('record accessors do not describe a 6-field struct: %s'
                          % [hex(f) for f in fields])
 
-    # The immediate of each accessor's own bound check, at +8 from the signature start.
-    bound_offs = [off + 8 for off, _ in hits]
-    return base, bound_offs
+    bounds = {b for _, b, _ in hits}
+    if len(bounds) != 1:
+        raise PatchError('record accessors disagree on the slot bound: %s' % sorted(bounds))
+    return base, bounds.pop(), [off for off, _, _ in hits]
 
 
 def records_refs(pe, lo, hi, base, size):
     """References into the records array.
 
-    Every genuine one is either `push imm32` or a [reg*8 + disp32] SIB operand -- the array
-    is always indexed as index*3*8. Requiring that shape rejects dwords that only match
+    Every genuine one is either `push imm32` or a [reg*8 + disp32] SIB operand, since the
+    array is always indexed as index*3*8. Requiring that shape rejects dwords that only match
     because they straddle a ModRM byte and an immediate.
     """
     out = []
@@ -216,8 +225,20 @@ def records_refs(pe, lo, hi, base, size):
     return out
 
 
-def collect_patches(pe, lo, hi):
+def locate_count_clamp(pe, lo, hi, rec_refs):
+    """The loot packet handler caps the item count it reads at 18 before parsing any slot."""
+    m = find_one(COUNT_CLAMP, bytes(pe.d[lo:hi]), 'loot packet item count clamp')
+    off = lo + m.start()
+    # the records memset follows it in the same handler
+    if not any(0 < r - off <= 0x200 for r, _ in rec_refs):
+        raise PatchError('item count clamp at %#x has no records reference after it'
+                         % pe.off_to_va(off))
+    return off + 1
+
+
+def collect_patches(pe, lo, hi, slots):
     data = bytes(pe.d)
+    alloc = alloc_count(slots)
     patches = []
     layout = {}
 
@@ -247,29 +268,32 @@ def collect_patches(pe, lo, hi):
     rlo, rhi = hull_lo - margin, hull_hi + margin
     seg = data[rlo:rhi]
 
-    for m in re.finditer(rb'\x83[\xf8-\xff]\x12', seg):
-        off = rlo + m.start()
+    for m in re.finditer(SLOT_BOUND, seg, re.S):
         after = seg[m.end():m.end() + 10]
         if not (re.search(rb'[\x72\x73]', after[:6]) or re.search(rb'\x0f[\x82\x83]', after[:6])):
-            raise PatchError('cmp r32,12h at %#x is not followed by a conditional jump'
-                             % pe.off_to_va(off))
-        patches.append((off + 2, b'\x12', bytes([NEW_COUNT]), 'display bound'))
+            raise PatchError('slot bound at %#x is not followed by a conditional jump'
+                             % pe.off_to_va(rlo + m.start()))
+        patches.append((rlo + m.end() - 1, b'\x12', bytes([slots]), 'display bound'))
 
     for pat in (rb'\x3d\x40\x02\x00\x00', rb'\x81[\xf8-\xff]\x40\x02\x00\x00'):
         for m in re.finditer(pat, seg):
             imm = rlo + m.end() - 4
             patches.append((imm, struct.pack('<I', disp_size),
-                            struct.pack('<I', NEW_COUNT * DISPLAY_STRIDE), 'display loop limit'))
+                            struct.pack('<I', slots * DISPLAY_STRIDE), 'display loop limit'))
 
     for m in re.finditer(rb'\x68\x40\x02\x00\x00', seg):
         imm = rlo + m.end() - 4
         patches.append((imm, struct.pack('<I', disp_size),
-                        struct.pack('<I', ALLOC_COUNT * DISPLAY_STRIDE), 'display memset'))
+                        struct.pack('<I', alloc * DISPLAY_STRIDE), 'display memset'))
 
-    patches.append((unroll_off, b'\x8d\x70\x03', b'\x8d\x70\x06', 'display unroll'))
+    patches.append((unroll_off, b'\x8d\x70\x03', bytes([0x8d, 0x70, alloc // UNROLL]),
+                    'display unroll'))
 
     # ---- records array -------------------------------------------------
-    rec_base, rec_bounds = locate_records(pe, lo, hi)
+    rec_base, rec_bound, rec_bounds = record_accessors(pe, lo, hi)
+    if rec_bound != OLD_COUNT:
+        raise PatchError('record accessors are bounded at %d, expected %d'
+                         % (rec_bound, OLD_COUNT))
     rec_size = OLD_COUNT * RECORDS_STRIDE
     rec_refs = records_refs(pe, lo, hi, rec_base, rec_size)
     if len(rec_refs) < 6:
@@ -278,36 +302,59 @@ def collect_patches(pe, lo, hi):
     for off, v in rec_refs:
         patches.append((off, struct.pack('<I', v), ('records', v - rec_base), 'records ref'))
 
-    # Bounds guarding the records array: the six accessors, plus any other cmp-18 sitting
-    # next to a reference (the per-slot clear function).
+    # the six accessors, plus any other cmp-18 next to a reference (the per-slot clear)
     bound_offs = set(rec_bounds)
     for m in re.finditer(rb'\x83[\xf8-\xff]\x12', bytes(pe.d[lo:hi])):
         off = lo + m.start()
         if any(abs(off - r) <= 0x60 for r, _ in rec_refs):
             bound_offs.add(off + 2)
     for off in sorted(bound_offs):
-        patches.append((off, b'\x12', bytes([NEW_COUNT]), 'records bound'))
+        patches.append((off, b'\x12', bytes([slots]), 'records bound'))
 
     for m in re.finditer(rb'\x68' + struct.pack('<I', rec_size), bytes(pe.d[lo:hi])):
         imm = lo + m.end() - 4
         if any(abs(imm - r) <= 0x80 for r, _ in rec_refs):
             patches.append((imm, struct.pack('<I', rec_size),
-                            struct.pack('<I', ALLOC_COUNT * RECORDS_STRIDE), 'records memset'))
+                            struct.pack('<I', alloc * RECORDS_STRIDE), 'records memset'))
+
+    # ---- loot packet handler -------------------------------------------
+    patches.append((locate_count_clamp(pe, lo, hi, rec_refs), b'\x12', bytes([slots]),
+                    'packet count clamp'))
 
     layout['display'] = (disp_base, DISPLAY_STRIDE, len(disp_refs))
     layout['records'] = (rec_base, RECORDS_STRIDE, len(rec_refs))
-    return patches, layout, (hull_lo, hull_hi)
+    return patches, layout
+
+
+def check_already_patched(pe, lo, hi, slots):
+    """Return True when there is nothing to do; raise when the client can't be patched."""
+    _, current, _ = record_accessors(pe, lo, hi)
+    hint = 'patch the unpatched wow.exe instead (wow.exe.bak if it was patched in place)'
+    if re.search(COUNT_CLAMP, bytes(pe.d[lo:hi]), re.S):
+        raise PatchError('patched for %d slots by an older version of this script, which left '
+                         'the loot packet handler capped at 18 items; %s' % (current, hint))
+    if current != slots:
+        raise PatchError('already patched for %d slots; %s' % (current, hint))
+    return True
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('exe', help='path to wow.exe')
+    ap.add_argument('--slots', type=int, required=True,
+                    help='loot slots the patched client takes (%d-%d); the server\'s '
+                         'MaxLootItems must not exceed it' % (OLD_COUNT + 1, MAX_SLOTS))
     ap.add_argument('--dry-run', action='store_true',
                     help='report what would change without writing')
     ap.add_argument('--output', help='write here instead of patching in place')
     ap.add_argument('--no-backup', action='store_true')
     args = ap.parse_args()
+
+    slots = args.slots
+    if not OLD_COUNT < slots <= MAX_SLOTS:
+        raise PatchError('--slots must be %d-%d' % (OLD_COUNT + 1, MAX_SLOTS))
+    alloc = alloc_count(slots)
 
     raw = open(args.exe, 'rb').read()
     print('input      %s (%d bytes, md5 %s)'
@@ -317,12 +364,13 @@ def main():
         raise PatchError('this does not look like a 3.3.5a build 12340 client')
 
     pe = PE(raw)
+    lo, hi = text_bytes(pe)
     if pe.section(SECTION_NAME) is not None:
-        print('already patched (%s section present); nothing to do' % SECTION_NAME.decode())
+        check_already_patched(pe, lo, hi, slots)
+        print('already patched for %d slots; nothing to do' % slots)
         return 0
 
-    lo, hi = text_bytes(pe)
-    patches, layout, hull = collect_patches(pe, lo, hi)
+    patches, layout = collect_patches(pe, lo, hi, slots)
 
     for name, (base, stride, nrefs) in layout.items():
         print('%-8s array %#x .. %#x  (%d x %#x)  %d refs'
@@ -340,14 +388,14 @@ def main():
                 raise PatchError('patches overlap at %#x (%s vs %s)' % (i, what, seen[i]))
             seen[i] = what
 
-    disp_alloc = ALLOC_COUNT * DISPLAY_STRIDE
-    rec_alloc = ALLOC_COUNT * RECORDS_STRIDE
+    disp_alloc = alloc * DISPLAY_STRIDE
+    rec_alloc = alloc * RECORDS_STRIDE
     sec_base = pe.append_bss_section(SECTION_NAME, disp_alloc + rec_alloc, SECTION_CHARS)
     new_base = {'display': sec_base, 'records': sec_base + disp_alloc}
     for name in ('display', 'records'):
-        alloc = disp_alloc if name == 'display' else rec_alloc
+        size = disp_alloc if name == 'display' else rec_alloc
         print('new %-6s %#x .. %#x  (%d entries allocated, %d usable)'
-              % (name, new_base[name], new_base[name] + alloc, ALLOC_COUNT, NEW_COUNT))
+              % (name, new_base[name], new_base[name] + size, alloc, slots))
 
     for off, old, new, what in patches:
         if bytes(pe.d[off:off + len(old)]) != old:
@@ -377,7 +425,7 @@ def main():
     out = open(dest, 'rb').read()
     print('output     %s (%d bytes, md5 %s)'
           % (dest, len(out), hashlib.md5(out).hexdigest()))
-    print('done; %d sites patched' % len(patches))
+    print('done; %d sites patched for %d slots' % (len(patches), slots))
     return 0
 
 

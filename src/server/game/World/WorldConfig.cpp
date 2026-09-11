@@ -517,7 +517,7 @@ void WorldConfig::BuildConfigCache()
     SetConfigValue<uint32>(CONFIG_LOOT_NEED_BEFORE_GREED_ILVL_RESTRICTION, "LootNeedBeforeGreedILvlRestriction", 70);
 
     SetConfigValue<uint32>(CONFIG_MAX_LOOT_ITEMS, "MaxLootItems", 18, ConfigValueCache::Reloadable::Yes,
-        [](uint32 const& value) { return value >= 1 && value <= MAX_NR_LOOT_ITEMS; }, "1-32");
+        [](uint32 const& value) { return value >= 1 && value <= MAX_NR_LOOT_ITEMS; }, "1-64");
 
     SetConfigValue<bool>(CONFIG_PLAYER_SETTINGS_ENABLED, "EnablePlayerSettings", 0);
 
