@@ -40,6 +40,8 @@ namespace
         "  point X Y Z                    on-mesh test, snapped Z, full height breakdown\n"
         "  path X1 Y1 Z1 X2 Y2 Z2         PathType mask, poly count, waypoints, length\n"
         "  ring X Y Z RADIUS HEADINGS     pass/fail table around a centre\n"
+        "  los X1 Y1 Z1 X2 Y2 Z2          static line of sight between two points\n"
+        "  los                            same, reading 6-tuples from stdin, one verdict per line\n"
         "\n"
         "Profile flags (default: ground player):\n"
         "  --creature                     use the creature branch of CreateFilter\n"
@@ -50,6 +52,9 @@ namespace
         "  --collision H                  collision height (default 2.03128)\n"
         "  --nav MASK                     override the filter include flags, e.g. 0x01\n"
         "\n"
+        "Ring flags:\n"
+        "  --los-from X Y Z               also report whether each slot can see this point\n"
+        "\n"
         "Path flags:\n"
         "  --straight                     findStraightPath instead of the smooth path\n"
         "  --limit D                      SetPathLengthLimit in yards\n"
@@ -59,7 +64,9 @@ namespace
         "\n"
         "Every tile on disk is preloaded, so answers are \"reachable in principle\". The server only\n"
         "holds tiles for grids it has loaded, so an in-game .mmap query can legitimately differ.\n"
-        "Corridor reuse, raycast mode, the slope gate and liquid are not modelled - see README.md.\n";
+        "Corridor reuse, raycast mode, the slope gate and liquid are not modelled - see README.md.\n"
+        "Sight is WMO and M2 collision only: GameObject collision is live server state, so a door or a\n"
+        "destructible that blocks in game does not block here.\n";
 
     bool ParseFloat(char const* s, float& out)
     {
@@ -89,6 +96,9 @@ namespace
         UnitProfile profile;
         std::string command;
         std::vector<float> coords;
+        // ring --los-from: the point every generated slot has to be able to see.
+        bool haveLosFrom = false;
+        float losFrom[3] = { 0.0f, 0.0f, 0.0f };
     };
 
     void PrintHeightBreakdown(HeightData const& height, UnitProfile const& profile, float x, float y, float z,
@@ -170,6 +180,18 @@ int main(int argc, char** argv)
             opt.straight = true;
         else if (arg == "--limit")
             ParseFloat(next("--limit"), opt.limit);
+        else if (arg == "--los-from")
+        {
+            for (float& component : opt.losFrom)
+            {
+                if (!ParseFloat(next("--los-from"), component))
+                {
+                    printf("error: --los-from needs three numbers\n");
+                    return 1;
+                }
+            }
+            opt.haveLosFrom = true;
+        }
         else if (arg == "--slope-check")
             printf("note: --slope-check is not ported (it needs liquid data); ignoring\n");
         else if (arg.rfind("--", 0) == 0)
@@ -204,7 +226,8 @@ int main(int argc, char** argv)
     HeightData height;
     height.Load(opt.dataDir, opt.mapId);
 
-    if (!meshLoaded && opt.command != "coverage")
+    // `los` reads vmaps only, so a map with no navmesh generated still answers it.
+    if (!meshLoaded && opt.command != "coverage" && opt.command != "los")
     {
         printf("error: %s\n", error.c_str());
         return 2;
@@ -267,7 +290,8 @@ int main(int argc, char** argv)
 
         if (!height.HasVmapTree())
             printf("             ** no vmap tree: WMO/M2 collision is unavailable, so ground height\n"
-                   "                comes from the raw .map surface alone **\n");
+                   "                comes from the raw .map surface alone, and `los` has nothing to\n"
+                   "                block with - every ray reads as clear **\n");
 
         for (std::string const& warning : mesh.Warnings())
             printf("warning      %s\n", warning.c_str());
@@ -445,6 +469,7 @@ int main(int argc, char** argv)
 
         NavQuery query(mesh, height, opt.profile);
         int onMesh = 0;
+        int inSight = 0;
 
         if (opt.json)
             printf("{\n  \"map\": %u,\n  \"points\": [\n", opt.mapId);
@@ -452,8 +477,11 @@ int main(int argc, char** argv)
         {
             printf("map %03u  ring around (%.3f, %.3f, %.3f)  radius %.2f  %d headings\n",
                    opt.mapId, cx, cy, cz, radius, headings);
-            printf("profile      %s\n\n", opt.profile.Describe().c_str());
-            printf("  deg          x          y          z   tile   poly    dist    meshZ   settledZ\n");
+            printf("profile      %s\n", opt.profile.Describe().c_str());
+            if (opt.haveLosFrom)
+                printf("sight from   (%.3f, %.3f, %.3f)\n", opt.losFrom[0], opt.losFrom[1], opt.losFrom[2]);
+            printf("\n  deg          x          y          z   tile   poly    dist    meshZ   settledZ%s\n",
+                   opt.haveLosFrom ? "   sight" : "");
         }
 
         for (int i = 0; i < headings; ++i)
@@ -473,13 +501,27 @@ int main(int argc, char** argv)
             if (poly != INVALID_POLYREF)
                 ++onMesh;
 
+            // Cast from where the bot would actually stand, which is the settled Z rather than the
+            // ring's nominal one - a slot half a yard below the floor sees through it.
+            bool clear = true;
+            if (opt.haveLosFrom)
+            {
+                float const eye = opt.profile.collisionHeight;
+                clear = height.IsInLineOfSight(x, y, settled + eye, opt.losFrom[0], opt.losFrom[1],
+                                               opt.losFrom[2] + eye);
+                if (clear)
+                    ++inSight;
+            }
+
             if (opt.json)
             {
                 printf("    { \"deg\": %.1f, \"x\": %.3f, \"y\": %.3f, \"z\": %.3f, \"tile\": %s, "
-                       "\"onMesh\": %s, \"distToPoly\": %.3f, \"settledZ\": %.3f }%s\n",
+                       "\"onMesh\": %s, \"distToPoly\": %.3f, \"settledZ\": %.3f",
                        angle * 180.0f / float(M_PI), x, y, cz, haveTile ? "true" : "false",
-                       poly != INVALID_POLYREF ? "true" : "false", dist, settled,
-                       i + 1 < headings ? "," : "");
+                       poly != INVALID_POLYREF ? "true" : "false", dist, settled);
+                if (opt.haveLosFrom)
+                    printf(", \"inLineOfSight\": %s", clear ? "true" : "false");
+                printf(" }%s\n", i + 1 < headings ? "," : "");
                 continue;
             }
 
@@ -491,18 +533,91 @@ int main(int argc, char** argv)
                 snprintf(meshText, sizeof(meshText), "%8.3f", closest[1]);
             }
 
-            printf("%5.0f %10.3f %10.3f %10.3f %6s %6s %s %s %10.3f\n",
+            printf("%5.0f %10.3f %10.3f %10.3f %6s %6s %s %s %10.3f%s\n",
                    angle * 180.0f / float(M_PI), x, y, cz,
                    haveTile ? "yes" : "NO",
                    poly != INVALID_POLYREF ? "yes" : "OFF",
-                   distText, meshText, settled);
+                   distText, meshText, settled,
+                   opt.haveLosFrom ? (clear ? "     yes" : "   BLIND") : "");
         }
 
         if (opt.json)
-            printf("  ],\n  \"onMesh\": %d,\n  \"total\": %d\n}\n", onMesh, headings);
+        {
+            printf("  ],\n  \"onMesh\": %d,\n  \"total\": %d", onMesh, headings);
+            if (opt.haveLosFrom)
+                printf(",\n  \"inLineOfSight\": %d", inSight);
+            printf("\n}\n");
+        }
         else
-            printf("\n%d/%d on mesh\n", onMesh, headings);
+        {
+            printf("\n%d/%d on mesh", onMesh, headings);
+            if (opt.haveLosFrom)
+                printf(", %d/%d in sight", inSight, headings);
+            printf("\n");
+            if (opt.haveLosFrom && !height.HasVmapTree())
+                printf("warning: no vmap tree loaded - nothing can block, so every slot reads as sighted\n");
+        }
 
+        return 0;
+    }
+
+    if (opt.command == "los")
+    {
+        float const eyeHeight = opt.profile.collisionHeight;
+
+        // No coordinates means a sweep on stdin, one "X1 Y1 Z1 X2 Y2 Z2" per line. Loading the vmap
+        // tree is the expensive part and it is per-process, so a thousand rays asked one invocation
+        // at a time costs a thousand tree loads - which is the difference between this answering a
+        // question offline and nobody using it.
+        if (opt.coords.empty())
+        {
+            uint32 total = 0;
+            uint32 clearCount = 0;
+            float a[3], b[3];
+            while (scanf("%f %f %f %f %f %f", &a[0], &a[1], &a[2], &b[0], &b[1], &b[2]) == 6)
+            {
+                bool const ok = height.IsInLineOfSight(a[0], a[1], a[2] + eyeHeight,
+                                                       b[0], b[1], b[2] + eyeHeight);
+                ++total;
+                clearCount += ok ? 1 : 0;
+                printf("%s\n", ok ? "CLEAR" : "BLOCKED");
+            }
+
+            fprintf(stderr, "%u/%u clear\n", clearCount, total);
+            if (!height.HasVmapTree())
+                fprintf(stderr, "warning: no vmap tree loaded - nothing can block\n");
+            return 0;
+        }
+
+        if (opt.coords.size() != 6)
+        {
+            printf("error: los needs X1 Y1 Z1 X2 Y2 Z2, or no coordinates to read them from stdin\n");
+            return 1;
+        }
+
+        // WorldObject::IsWithinLOSInMap casts from the observer's eye, not its feet, so the collision
+        // height goes on both ends. Without it a ray along the floor clips every doorstep.
+        float const eye = eyeHeight;
+        bool const clear = height.IsInLineOfSight(opt.coords[0], opt.coords[1], opt.coords[2] + eye,
+                                                  opt.coords[3], opt.coords[4], opt.coords[5] + eye);
+
+        if (opt.json)
+        {
+            printf("{\n  \"map\": %u,\n  \"from\": [%.3f, %.3f, %.3f],\n  \"to\": [%.3f, %.3f, %.3f],\n"
+                   "  \"eye\": %.5f,\n  \"vmapTree\": %s,\n  \"inLineOfSight\": %s\n}\n",
+                   opt.mapId, opt.coords[0], opt.coords[1], opt.coords[2],
+                   opt.coords[3], opt.coords[4], opt.coords[5], eye,
+                   height.HasVmapTree() ? "true" : "false", clear ? "true" : "false");
+            return 0;
+        }
+
+        printf("map %03u  line of sight\n", opt.mapId);
+        printf("from       (%.3f, %.3f, %.3f) + %.5f eye\n", opt.coords[0], opt.coords[1], opt.coords[2], eye);
+        printf("to         (%.3f, %.3f, %.3f) + %.5f eye\n", opt.coords[3], opt.coords[4], opt.coords[5], eye);
+        printf("sight      %s\n", clear ? "CLEAR" : "BLOCKED");
+        if (!height.HasVmapTree())
+            printf("warning: no vmap tree loaded - nothing can block, so CLEAR here means nothing\n");
+        printf("note: WMO and M2 only; GameObject collision needs a live server\n");
         return 0;
     }
 

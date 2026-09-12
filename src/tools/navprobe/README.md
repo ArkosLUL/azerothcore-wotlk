@@ -35,6 +35,8 @@ navprobe --map ID [--data DIR] <command> [flags]
   point X Y Z                    on-mesh test, snapped Z, full height breakdown
   path X1 Y1 Z1 X2 Y2 Z2         PathType mask, poly count, waypoints, length
   ring X Y Z RADIUS HEADINGS     pass/fail table around a centre
+  los X1 Y1 Z1 X2 Y2 Z2          static line of sight between two points
+  los                            same, reading 6-tuples from stdin, one verdict per line
 ```
 
 `--format json` on any of them. Profile flags (`--creature`, `--can-fly`, `--no-swim`, `--falling`,
@@ -70,7 +72,9 @@ Height follows `Map::GetHeight`, `WorldObject::GetMapHeight` and
   reports that it was ignored.
 - **Liquid, anywhere.** So `IsWaterPath` is always false, `UpdateFilter` never widens the include
   flags, and the swim branch of `UpdateAllowedPositionZ` collapses into the ground branch.
-- **GameObject collision.** The dynamic tree is live server state.
+- **GameObject collision.** The dynamic tree is live server state, so `los` misses doors and
+  destructibles. With no vmap tree it has nothing to block with and every ray reads clear; `coverage`
+  says so.
 - **The Blade's Edge Arena rope snap** in `NormalizePath`.
 
 **It preloads every tile on disk.** The server only holds tiles for grids it has loaded, so navprobe

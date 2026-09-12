@@ -150,6 +150,10 @@ namespace navprobe
         // WorldObject::UpdateAllowedPositionZ. Returns the Z the server would settle on.
         [[nodiscard]] float UpdateAllowedPositionZ(UnitProfile const& profile, float x, float y, float z,
                                                    float* groundZ = nullptr) const;
+        // The static half of Map::isInLineOfSight: WMO and M2 collision only. True when nothing is in
+        // the way - including when no vmap tree loaded, which is why `coverage` warns about that.
+        // GameObject collision is live server state and is not represented here, same as for height.
+        [[nodiscard]] bool IsInLineOfSight(float x1, float y1, float z1, float x2, float y2, float z2) const;
 
     private:
         [[nodiscard]] GridTile const* TileAt(float x, float y) const;

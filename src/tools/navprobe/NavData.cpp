@@ -21,6 +21,7 @@
 #include "MMapMgr.h"
 #include "MapDefines.h"
 #include "MapTree.h"
+#include "ModelIgnoreFlags.h"
 #include "StringFormat.h"
 #include "VMapMgr2.h"
 #include <G3D/Vector3.h>
@@ -520,6 +521,21 @@ float HeightData::GetVmapHeight(float x, float y, float z, float maxSearchDist) 
         return VMAP_INVALID_HEIGHT_VALUE;
 
     return height;
+}
+
+bool HeightData::IsInLineOfSight(float x1, float y1, float z1, float x2, float y2, float z2) const
+{
+    if (!_tree)
+        return true;
+
+    // Map::isInLineOfSight guards this, and the tree's own traversal treats a zero-length ray as a
+    // miss rather than a trivial hit.
+    if (x1 == x2 && y1 == y2 && z1 == z2)
+        return true;
+
+    return _tree->isInLineOfSight(VMAP::VMapMgr2::convertPositionToInternalRep(x1, y1, z1),
+                                  VMAP::VMapMgr2::convertPositionToInternalRep(x2, y2, z2),
+                                  VMAP::ModelIgnoreFlags::Nothing);
 }
 
 float HeightData::GetMapHeight(float x, float y, float z, bool checkVmap, float maxSearchDist) const
