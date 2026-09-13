@@ -3448,6 +3448,11 @@ void SpellMgr::LoadSpellInfoCustomAttributes()
                                 spellInfo->Id == 62601 || spellInfo->Id == 62604 || spellInfo->Id == 62605)
                                 continue;
 
+                            // Dark Volley / Malady of the Mind: damage plus a debuff, but retail
+                            // logs show the damage still takes partial resists
+                            if (spellInfo->Id == 63038 || spellInfo->Id == 63830)
+                                continue;
+
                             if (spellInfo->SpellFamilyName == SPELLFAMILY_MAGE && (spellInfo->SpellFamilyFlags[0] & 0x20)) // Frostbolt
                                 continue;
 
