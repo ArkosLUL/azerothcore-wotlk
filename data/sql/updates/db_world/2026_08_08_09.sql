@@ -21,7 +21,9 @@ SET @GO_CHEST_NORMAL_HERO := 194308; -- GO_HODIR_CHEST_NORMAL_HERO (Cache of Win
 SET @GO_CHEST_HARD_HERO   := 194201; -- GO_HODIR_CHEST_HARD_HERO   (Rare Cache of Winter, 25m)
 
 -- Free guid block. Verify with: SELECT MAX(`guid`) + 1 FROM `gameobject`;
-SET @OGUID := 5714442;
+-- Kept well clear of 5714438-5714540: mod-individual-progression spawns there, right on top
+-- of the core's max guid (5714437).
+SET @OGUID := 5800000;
 
 -- Deleting by id (not by guid range) so a wrong @OGUID can never wipe unrelated spawns.
 DELETE FROM `gameobject` WHERE `id` IN (@GO_CHEST_NORMAL, @GO_CHEST_HARD, @GO_CHEST_NORMAL_HERO, @GO_CHEST_HARD_HERO);

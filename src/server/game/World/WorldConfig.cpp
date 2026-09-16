@@ -15,6 +15,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "LootMgr.h"
 #include "Player.h"
 #include "WorldConfig.h"
 
@@ -515,6 +516,9 @@ void WorldConfig::BuildConfigCache()
 
     SetConfigValue<uint32>(CONFIG_LOOT_NEED_BEFORE_GREED_ILVL_RESTRICTION, "LootNeedBeforeGreedILvlRestriction", 70);
 
+    SetConfigValue<uint32>(CONFIG_MAX_LOOT_ITEMS, "MaxLootItems", 18, ConfigValueCache::Reloadable::Yes,
+        [](uint32 const& value) { return value >= 1 && value <= MAX_NR_LOOT_ITEMS; }, "1-64");
+
     SetConfigValue<bool>(CONFIG_PLAYER_SETTINGS_ENABLED, "EnablePlayerSettings", 0);
 
     SetConfigValue<bool>(CONFIG_ALLOW_JOIN_BG_AND_LFG, "JoinBGAndLFG.Enable", false);
@@ -530,6 +534,12 @@ void WorldConfig::BuildConfigCache()
     SetConfigValue<uint32>(CONFIG_CHANGE_FACTION_MAX_MONEY, "ChangeFaction.MaxMoney", 0);
 
     SetConfigValue<bool>(CONFIG_ALLOWS_RANK_MOD_FOR_PET_HEALTH, "Pet.RankMod.Health", true);
+
+    // mod-spell-tweaks: hunter pets inherit their owner's armor penetration (read in Unit::CalcArmorReducedDamage).
+    SetConfigValue<bool>(CONFIG_HUNTER_PET_ARMOR_PEN, "SpellTweaks.HunterPetArmorPen.Enable", true);
+
+    // mod-spell-tweaks: Death Knight ghouls inherit their owner's armor penetration (read in Unit::CalcArmorReducedDamage).
+    SetConfigValue<bool>(CONFIG_DK_GHOUL_ARMOR_PEN, "SpellTweaks.DKGhoulArmorPen.Enable", true);
 
     SetConfigValue<bool>(CONFIG_MUNCHING_BLIZZLIKE, "MunchingBlizzlike.Enabled", true);
 

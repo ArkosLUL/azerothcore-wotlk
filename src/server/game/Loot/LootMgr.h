@@ -48,8 +48,10 @@ enum RollMask
     ROLL_ALL_TYPE_MASK                  = 0x0F
 };
 
-#define MAX_NR_LOOT_ITEMS 18
-// note: the client cannot show more than 18 items in the loot window on 3.3.5a
+// Highest value the MaxLootItems config may take. The client indexes fixed slot arrays with
+// the slot number the server sends: 18 entries in a stock 3.3.5a client, more in a
+// binary-patched one. Overshooting what the client has corrupts its memory.
+#define MAX_NR_LOOT_ITEMS 64
 #define MAX_NR_QUEST_ITEMS 32
 // unrelated to the number of quest items shown, just for reserve
 

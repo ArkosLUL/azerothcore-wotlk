@@ -33,13 +33,14 @@ public:
     {
         static ChatCommandTable groupCommandTable =
         {
-            { "list",    HandleGroupListCommand,    rbac::RBAC_PERM_COMMAND_GROUP_LIST,    Console::Yes },
-            { "join",    HandleGroupJoinCommand,    rbac::RBAC_PERM_COMMAND_GROUP_JOIN,    Console::No },
-            { "remove",  HandleGroupRemoveCommand,  rbac::RBAC_PERM_COMMAND_GROUP_REMOVE,  Console::No },
-            { "disband", HandleGroupDisbandCommand, rbac::RBAC_PERM_COMMAND_GROUP_DISBAND, Console::No },
-            { "revive",  HandleGroupReviveCommand,  rbac::RBAC_PERM_COMMAND_GROUP_REVIVE,  Console::No },
-            { "leader",  HandleGroupLeaderCommand,  rbac::RBAC_PERM_COMMAND_GROUP_LEADER,  Console::No },
-            { "invites", HandleGroupInvitesCommand, rbac::RBAC_PERM_COMMAND_GROUP_INVITES, Console::No }
+            { "list",     HandleGroupListCommand,     rbac::RBAC_PERM_COMMAND_GROUP_LIST,     Console::Yes },
+            { "join",     HandleGroupJoinCommand,     rbac::RBAC_PERM_COMMAND_GROUP_JOIN,     Console::No },
+            { "remove",   HandleGroupRemoveCommand,   rbac::RBAC_PERM_COMMAND_GROUP_REMOVE,   Console::No },
+            { "disband",  HandleGroupDisbandCommand,  rbac::RBAC_PERM_COMMAND_GROUP_DISBAND,  Console::No },
+            { "revive",   HandleGroupReviveCommand,   rbac::RBAC_PERM_COMMAND_GROUP_REVIVE,   Console::No },
+            { "cooldown", HandleGroupCooldownCommand, rbac::RBAC_PERM_COMMAND_GROUP_COOLDOWN, Console::No },
+            { "leader",   HandleGroupLeaderCommand,   rbac::RBAC_PERM_COMMAND_GROUP_LEADER,   Console::No },
+            { "invites",  HandleGroupInvitesCommand,  rbac::RBAC_PERM_COMMAND_GROUP_INVITES,  Console::No }
         };
 
         static ChatCommandTable commandTable =
@@ -289,6 +290,43 @@ public:
                 target->SpawnCorpseBones();
                 target->SaveToDB(false, false);
             }
+        }
+
+        return true;
+    }
+
+    static bool HandleGroupCooldownCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
+    {
+        if (!target)
+        {
+            target = PlayerIdentifier::FromTargetOrSelf(handler);
+        }
+
+        if (!target || !target->IsConnected())
+        {
+            return false;
+        }
+
+        Player* targetPlayer = target->GetConnectedPlayer();
+        Group* group = targetPlayer->GetGroup();
+        std::string nameLink = handler->playerLink(target->GetName());
+
+        if (!group)
+        {
+            handler->SendErrorMessage(LANG_NOT_IN_GROUP, nameLink);
+            return false;
+        }
+
+        for (GroupReference* it = group->GetFirstMember(); it != nullptr; it = it->next())
+        {
+            Player* member = it->GetSource();
+            if (!member)
+            {
+                continue;
+            }
+
+            member->RemoveAllSpellCooldown();
+            handler->PSendSysMessage(LANG_REMOVEALL_COOLDOWN, handler->GetNameLink(member));
         }
 
         return true;

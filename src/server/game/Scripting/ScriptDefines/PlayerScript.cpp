@@ -988,6 +988,9 @@ void ScriptMgr::OnPlayerGetTrainerSpellState(Player const* player, uint32 traine
 void ScriptMgr::OnPlayerAfterTrainSpell(Player* player, Creature* trainer, uint32 spellId)
 {
     CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_AFTER_TRAIN_SPELL, script->OnPlayerAfterTrainSpell(player, trainer, spellId));
+void ScriptMgr::OnEnvironmentalDamage(Player* player, EnviromentalDamage type, uint32 damage)
+{
+    CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_ENVIRONMENTAL_DAMAGE, script->OnEnvironmentalDamage(player, type, damage));
 }
 
 PlayerScript::PlayerScript(char const* name, std::vector<uint16> enabledHooks)

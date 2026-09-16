@@ -3442,6 +3442,17 @@ void SpellMgr::LoadSpellInfoCustomAttributes()
                                 spellInfo->Id == 73061 || spellInfo->Id == 73062 || spellInfo->Id == 73063 || spellInfo->Id == 73064)
                                 continue;
 
+                            // Sif (Thorim hardmode) pairs her frost damage with a snare or a root, but on retail
+                            // that damage still takes partial resists: Frostbolt, Frostbolt Volley, Frost Nova
+                            if (spellInfo->Id == 62580 || spellInfo->Id == 62583 || spellInfo->Id == 62597 ||
+                                spellInfo->Id == 62601 || spellInfo->Id == 62604 || spellInfo->Id == 62605)
+                                continue;
+
+                            // Dark Volley / Malady of the Mind: damage plus a debuff, but retail
+                            // logs show the damage still takes partial resists
+                            if (spellInfo->Id == 63038 || spellInfo->Id == 63830)
+                                continue;
+
                             if (spellInfo->SpellFamilyName == SPELLFAMILY_MAGE && (spellInfo->SpellFamilyFlags[0] & 0x20)) // Frostbolt
                                 continue;
 

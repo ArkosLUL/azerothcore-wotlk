@@ -488,7 +488,7 @@ void Loot::AddItem(LootStoreItem const& item)
     uint32 stacks = count / proto->GetMaxStackSize() + (count % proto->GetMaxStackSize() ? 1 : 0);
 
     std::vector<LootItem>& lootItems = item.needs_quest ? quest_items : items;
-    uint32 limit = item.needs_quest ? MAX_NR_QUEST_ITEMS : MAX_NR_LOOT_ITEMS;
+    uint32 limit = item.needs_quest ? MAX_NR_QUEST_ITEMS : sWorld->getIntConfig(CONFIG_MAX_LOOT_ITEMS);
 
     for (uint32 i = 0; i < stacks && lootItems.size() < limit; ++i)
     {
@@ -554,7 +554,7 @@ bool Loot::FillLoot(uint32 lootId, LootStore const& store, Player* lootOwner, bo
         return false;
     }
 
-    items.reserve(MAX_NR_LOOT_ITEMS);
+    items.reserve(sWorld->getIntConfig(CONFIG_MAX_LOOT_ITEMS));
     quest_items.reserve(MAX_NR_QUEST_ITEMS);
 
     // Initial group is 0, top level set to True
@@ -655,7 +655,9 @@ QuestItemList* Loot::FillFFALoot(Player* player)
 
 QuestItemList* Loot::FillQuestLoot(Player* player)
 {
-    if (items.size() == MAX_NR_LOOT_ITEMS)
+    uint32 const maxLootItems = sWorld->getIntConfig(CONFIG_MAX_LOOT_ITEMS);
+
+    if (items.size() >= maxLootItems)
         return nullptr;
 
     QuestItemList* ql = new QuestItemList();
@@ -691,7 +693,7 @@ QuestItemList* Loot::FillQuestLoot(Player* player)
             }
         }
 
-        if (items.size() + ql->size() == MAX_NR_LOOT_ITEMS)
+        if (items.size() + ql->size() >= maxLootItems)
             break;
     }
 
