@@ -419,9 +419,12 @@ enum UlduarMisc
     ACTION_DESPAWN_ALGALON                  = 2,
     ACTION_START_INTRO                      = 3,
 
-    TIMER_ALGALON_DEFEATED                  = 300,
-    TIMER_ALGALON_TO_SUMMON                 = 200,
-    TIMER_ALGALON_SUMMONED                  = 100,
+    ALGALON_DESPAWN_TIMER_MINUTES           = 300,
+
+    // Share PERSISTENT_DATA_ALGALON_TIMER with the minutes left, keep them above ALGALON_DESPAWN_TIMER_MINUTES
+    TIMER_ALGALON_DEFEATED                  = 3000,
+    TIMER_ALGALON_TO_SUMMON                 = 2000,
+    TIMER_ALGALON_SUMMONED                  = 1000,
 
     // Algalon the Observer, Freya, Hodir, Mimiron, Thorim, Gossip Keepers
     SPELL_TELEPORT                          = 62940,
