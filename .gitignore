@@ -138,5 +138,3 @@ e2e/go.work.sum
 .cache
 compile_commands.json
 /configurationOverrides/*
-.tokensave
-.codegraph
