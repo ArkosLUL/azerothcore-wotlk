@@ -1,0 +1,15 @@
+{
+  "extensions": { ".h": "cpp" },
+  "includeIgnored": ["modules/"],
+  "exclude": [
+    "data/sql/old",
+    "data/sql/archive",
+    "env",
+    "conf",
+    "deps/deno",
+    "node_modules",
+    "modules/**/sql",
+    "modules/**/data",
+    "modules/**/.git"
+  ]
+}

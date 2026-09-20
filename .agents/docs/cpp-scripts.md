@@ -5,7 +5,7 @@ Scripts inherit from a `ScriptObject` subclass (`SpellScript`, `AuraScript`, `Cr
 - **Spell / aura scripts**: `RegisterSpellScript(ClassName)` (or `RegisterSpellAndAuraScriptPair(...)`) inside `AddSC_<name>()`.
 - **Creature scripts**: prefer `RegisterCreatureAI(ClassName)` for new code; legacy zones still use `new ClassName();`. Match the surrounding pattern.
 
-Then declare and call `AddSC_<name>()` from the regional loader (`Spells/spells_script_loader.cpp`, `EasternKingdoms/eastern_kingdoms_script_loader.cpp`, …).
+Then declare and call `AddSC_<name>()` from the regional loader (`Spells/spells_script_loader.cpp`, `EasternKingdoms/eastern_kingdoms_script_loader.cpp`, …). The chain continues into `ScriptLoader.cpp.in.cmake` (modules: `modules/ModulesLoader.cpp.in.cmake`), generated at CMake configure time and absent from the tree — a call graph reaches the regional loader and stops there. Ulduar bosses register through `RegisterUlduarCreatureAI`, defined only in `ulduar.h`, so search the class name rather than the macro.
 
 **SmartAI** (data-driven creature behaviour) lives in the world DB's `smart_scripts` table, not C++ (engine: `src/server/game/AI/SmartScripts/`). For new creature behaviour prefer SmartAI (via the SQL update workflow); reach for `CreatureScript` only when SmartAI's event/action vocabulary isn't enough.
 

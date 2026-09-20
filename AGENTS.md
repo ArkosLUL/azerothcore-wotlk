@@ -5,6 +5,12 @@ AzerothCore is a C++ MMORPG server emulator for World of Warcraft 3.3.5a (WotLK)
 ## Agent rules
 
 - **Do not configure or build unless explicitly asked.** Builds are slow and rarely needed for code changes.
+- **Start code discovery with a code graph**, not `Grep`/`Read`. Default to tokensave (see
+  `~/.claude/rules/tokensave.md`); `search` with `literal: true` matches exact source text, which is
+  how mod-playerbots string keys resolve. `codegraph callers|callees|impact <name>` answers by name
+  in one hop when you just need a caller list. Both index `modules/` and
+  `src/server/scripts/Custom/` despite `.gitignore`; `wowsimwotlk` is a separate tokensave project,
+  reached with `graph_root`.
 - **Never edit SQL files outside `data/sql/updates/pending_db_*/` unless explicitly requested.** `data/sql/base/`, `data/sql/archive/`, and `data/sql/updates/db_*/` are immutable.
 - Formatting follows `.editorconfig`: UTF-8, LF, max 120 cols, trailing newline, no trailing whitespace; 4-space indent for C++ (tabs forbidden), 2-space for JSON/YAML/sh/ts/js.
 - **Do not write or add live-stack e2e tests unless the user explicitly asks.** Do not create `e2e/local/` scratch tests to validate a fix. Existing `e2e/` tests that break after a change may be updated. Do not mention missing coverage unless the user asked about it.
@@ -20,6 +26,7 @@ Read the matching doc(s) BEFORE starting the task:
   - Script work (under `src/server/scripts/`) → also `.agents/docs/cpp-scripts.md`
 - Creating or modifying SQL → `.agents/docs/sql-guidelines.md`
   - SmartAI work (`smart_scripts` data) → also `.agents/docs/cpp-scripts.md`
+- Tracing a `ScriptName` / `spell_script_names` / `smart_scripts` row to its C++ script, or back → `.agents/docs/systems/script-bindings.md`
 - Reviewing a changeset or PR → `.agents/docs/code-review.md`
 - Self-reviewing, or opening or updating a PR → also `.agents/docs/self-review-rules.md`
 - Touching a subsystem that has a doc in `.agents/docs/systems/` → read that doc too
