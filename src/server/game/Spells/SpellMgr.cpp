@@ -3453,6 +3453,11 @@ void SpellMgr::LoadSpellInfoCustomAttributes()
                             if (spellInfo->Id == 63038 || spellInfo->Id == 63830)
                                 continue;
 
+                            // Water Spray (Mimiron fire bots): the knockback makes it look binary,
+                            // but retail logs show partial frost resists on the damage
+                            if (spellInfo->Id == 64619)
+                                continue;
+
                             if (spellInfo->SpellFamilyName == SPELLFAMILY_MAGE && (spellInfo->SpellFamilyFlags[0] & 0x20)) // Frostbolt
                                 continue;
 
