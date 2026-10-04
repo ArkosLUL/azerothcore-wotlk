@@ -1,5 +1,4 @@
 name: pch-build
-
 on:
   push:
     branches:
@@ -10,6 +9,7 @@ on:
       - opened
       - reopened
       - synchronize
+      - ready_for_review
 
 concurrency:
   # One concurrency group per workflow + ref.
