@@ -3463,6 +3463,11 @@ void SpellMgr::LoadSpellInfoCustomAttributes()
                             if (spellInfo->Id == 64619)
                                 continue;
 
+                            // Cosmic Smash (Algalon) also pairs its damage with a knockback, and
+                            // retail logs show partial fire resists on it in both raid sizes
+                            if (spellInfo->Id == 62311 || spellInfo->Id == 64596)
+                                continue;
+
                             if (spellInfo->SpellFamilyName == SPELLFAMILY_MAGE && (spellInfo->SpellFamilyFlags[0] & 0x20)) // Frostbolt
                                 continue;
 
