@@ -131,6 +131,7 @@ World::World()
     _nextCalendarOldEventsDeletionTime = 0s;
     _nextGuildReset = 0s;
     _defaultDbcLocale = LOCALE_enUS;
+    _availableDbcLocaleMask = 0;
     _mail_expire_check_timer = 0s;
     _isClosed = false;
     _cleaningFlags = 0;
