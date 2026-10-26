@@ -665,6 +665,7 @@ void WorldConfig::BuildConfigCache()
     // ICC buff override
     SetConfigValue<uint32>(CONFIG_ICC_BUFF_HORDE, "ICC.Buff.Horde", 73822);
     SetConfigValue<uint32>(CONFIG_ICC_BUFF_ALLIANCE, "ICC.Buff.Alliance", 73828);
+    SetConfigValue<bool>(CONFIG_ICC_BUFF_PROGRESSIVE, "ICC.Buff.Progressive", true);
 
     // packet spoof punishment
     SetConfigValue<uint32>(CONFIG_PACKET_SPOOF_BANMODE, "PacketSpoof.BanMode", 0, ConfigValueCache::Reloadable::Yes, [](uint32 const& value) { return value == 0; }, "== 0");

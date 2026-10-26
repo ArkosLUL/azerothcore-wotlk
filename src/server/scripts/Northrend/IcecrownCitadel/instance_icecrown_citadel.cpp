@@ -17,17 +17,22 @@
 
 #include "AccountMgr.h"
 #include "AreaDefines.h"
+#include "Chat.h"
 #include "CreatureTextMgr.h"
 #include "Group.h"
 #include "InstanceMapScript.h"
+#include "InstanceSaveMgr.h"
 #include "InstanceScript.h"
 #include "Map.h"
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
+#include "SpellMgr.h"
 #include "Transport.h"
+#include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
+#include "WorldState.h"
 #include "WorldStateDefines.h"
 #include "icecrown_citadel.h"
 #include <array>
@@ -299,6 +304,7 @@ public:
             _saurfangOutroRunning = false;
             _saurfangZeppelinDocked = false;
             _saurfangZeppelinLeaving = false;
+            _iccBuffLevel = sWorldState->GetIccBuffLevel();
 
             SetHeaders(DataHeader);
             SetBossNumber(MAX_ENCOUNTERS);
@@ -368,36 +374,17 @@ public:
             }
 
             if (IsBuffAvailable)
-            {
-                SpellAreaForAreaMapBounds saBounds = sSpellMgr->GetSpellAreaForAreaMapBounds(4812);
-                for (SpellAreaForAreaMap::const_iterator itr = saBounds.first; itr != saBounds.second; ++itr)
-                    if ((itr->second->raceMask & player->getRaceMask()) && !player->HasAura(itr->second->spellId))
-                    {
-                        if (SpellInfo const* si = sSpellMgr->GetSpellInfo(itr->second->spellId))
-                        {
-                            if (si->HasAura(SPELL_AURA_MOD_INCREASE_HEALTH_PERCENT))
-                            {
-                                DoCastSpellOnPlayer(player, itr->second->spellId, false, false);
-                            }
-                        }
-                    }
-            }
+                if (uint32 const buff = sSpellMgr->GetActiveIccBuff(player); buff && !player->HasAura(buff))
+                    DoCastSpellOnPlayer(player, buff, false, false);
         }
 
         void OnCreatureCreate(Creature* creature) override
         {
             // apply ICC buff to pets/summons
-            if (GetData(DATA_BUFF_AVAILABLE) && creature->GetOwnerGUID().IsPlayer() && creature->HasUnitTypeMask(UNIT_MASK_MINION | UNIT_MASK_GUARDIAN | UNIT_MASK_CONTROLLABLE_GUARDIAN) && creature->CanHaveThreatList())
+            if (GetData(DATA_BUFF_AVAILABLE) && GetsIccBuff(creature))
                 if (Unit* owner = creature->GetOwner())
                     if (Player* plr = owner->ToPlayer())
-                    {
-                        SpellAreaForAreaMapBounds saBounds = sSpellMgr->GetSpellAreaForAreaMapBounds(4812);
-                        for (SpellAreaForAreaMap::const_iterator itr = saBounds.first; itr != saBounds.second; ++itr)
-                            if ((itr->second->raceMask & plr->getRaceMask()) && !creature->HasAura(itr->second->spellId))
-                                if (SpellInfo const* si = sSpellMgr->GetSpellInfo(itr->second->spellId))
-                                    if (si->HasAura(SPELL_AURA_MOD_INCREASE_HEALTH_PERCENT))
-                                        creature->AddAura(itr->second->spellId, creature);
-                    }
+                        sSpellMgr->ApplyIccBuff(creature, plr);
 
             // fighting npcs in Rampart of Skulls
             std::string name1("Skybreaker ");
@@ -1320,6 +1307,10 @@ public:
                             instance->SummonCreature(NPC_MURADIN_BRONZEBEARD_QUEST, MuradinSpawnPos);
                             instance->SummonCreature(NPC_UTHER_THE_LIGHTBRINGER_QUEST, UtherSpawnPos);
                             instance->SummonCreature(NPC_LADY_SYLVANAS_WINDRUNNER_QUEST, SylvanasSpawnPos);
+
+                            // DONE also replays on instance load, the per-lockout check stops a second count
+                            if (sWorld->getBoolConfig(CONFIG_ICC_BUFF_PROGRESSIVE))
+                                CountLichKingKillForIccBuff();
                         }
                         break;
                     }
@@ -1328,6 +1319,45 @@ public:
             }
 
             return true;
+        }
+
+        static bool GetsIccBuff(Unit const* summon)
+        {
+            return summon->GetOwnerGUID().IsPlayer() && summon->CanHaveThreatList() &&
+                summon->HasUnitTypeMask(UNIT_MASK_MINION | UNIT_MASK_GUARDIAN | UNIT_MASK_CONTROLLABLE_GUARDIAN);
+        }
+
+        // The level can go up from a kill in any instance. A sub-area change only removes the old
+        // level, the new one is cast on zone entry, so players already inside get it here.
+        void RefreshIccBuff()
+        {
+            if (!IsBuffAvailable)
+                return;
+
+            instance->DoForAllPlayers([this](Player* player)
+            {
+                player->UpdateAreaDependentAuras(player->GetAreaId());
+                if (uint32 const buff = sSpellMgr->GetActiveIccBuff(player); buff && !player->HasAura(buff))
+                    DoCastSpellOnPlayer(player, buff, false, false);
+
+                for (Unit* controlled : player->m_Controlled)
+                    if (GetsIccBuff(controlled))
+                        sSpellMgr->ApplyIccBuff(controlled, player);
+            });
+        }
+
+        void CountLichKingKillForIccBuff()
+        {
+            time_t const lockoutReset = sInstanceSaveMgr->GetResetTimeFor(instance->GetId(), instance->GetDifficulty());
+            if (!sWorldState->CountIccLichKingKill(uint32(lockoutReset)))
+                return;
+
+            uint32 const percent = (sWorldState->GetIccBuffLevel() + 1) * 5;
+            instance->DoForAllPlayers([percent](Player* player)
+            {
+                ChatHandler(player->GetSession()).PSendSysMessage(
+                    "The Lich King has fallen. The Icecrown Citadel buff is now {}%.", percent);
+            });
         }
 
         void SpawnGunship()
@@ -2042,6 +2072,12 @@ public:
 
         void Update(uint32 diff) override
         {
+            if (uint8 const level = sWorldState->GetIccBuffLevel(); level != _iccBuffLevel)
+            {
+                _iccBuffLevel = level;
+                RefreshIccBuff();
+            }
+
             // Xinef: A Feast of Souls (24547) whispers
             if (LichKingRandomWhisperTimer <= diff)
             {
@@ -2403,6 +2439,7 @@ public:
         bool _saurfangOutroRunning;
         bool _saurfangZeppelinDocked;
         bool _saurfangZeppelinLeaving;
+        uint8 _iccBuffLevel;
         ObjectGuid PlagueSigilGUID;
         ObjectGuid BloodwingSigilGUID;
         ObjectGuid FrostwingSigilGUID;

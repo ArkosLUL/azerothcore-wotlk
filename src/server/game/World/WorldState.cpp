@@ -22,6 +22,7 @@
 #include "MapMgr.h"
 #include "Player.h"
 #include "SharedDefines.h"
+#include "SpellMgr.h"
 #include "TC9Sidecar.h"
 #include "UnitAI.h"
 #include "Weather.h"
@@ -145,6 +146,7 @@ void WorldState::LoadWorldStates()
     {
         LOG_WARN("server.loading", ">> Loaded 0 world states. DB table `worldstates` is empty!");
         LOG_INFO("server.loading", " ");
+        InitIccBuffLevel();
         return;
     }
 
@@ -156,6 +158,44 @@ void WorldState::LoadWorldStates()
 
     LOG_INFO("server.loading", ">> Loaded {} World States in {} ms", _worldstates.size(), GetMSTimeDiffToNow(oldMSTime));
     LOG_INFO("server.loading", " ");
+    InitIccBuffLevel();
+}
+
+void WorldState::InitIccBuffLevel()
+{
+    // Create both rows now: kills are counted from map threads, which must only update
+    // existing _worldstates entries, never insert new ones.
+    for (uint32 index : { WORLD_STATE_CUSTOM_ICC_BUFF_LEVEL, WORLD_STATE_CUSTOM_ICC_BUFF_LAST_KILL_RESET })
+        if (_worldstates.find(index) == _worldstates.end())
+            setWorldState(index, 0);
+
+    _iccBuffLevel = uint8(std::min<uint64>(getWorldState(WORLD_STATE_CUSTOM_ICC_BUFF_LEVEL), ICC_BUFF_LEVELS - 1));
+
+    if (sWorld->getBoolConfig(CONFIG_ICC_BUFF_PROGRESSIVE))
+    {
+        uint32 const level = GetIccBuffLevel();
+        LOG_INFO("server.loading", ">> ICC buff level {} ({}%)", level, (level + 1) * 5);
+        LOG_INFO("server.loading", " ");
+    }
+}
+
+bool WorldState::CountIccLichKingKill(uint32 lockoutResetTime)
+{
+    std::lock_guard<std::mutex> guard(_iccBuffMutex);
+
+    if (getWorldState(WORLD_STATE_CUSTOM_ICC_BUFF_LAST_KILL_RESET) == lockoutResetTime)
+        return false;
+
+    setWorldState(WORLD_STATE_CUSTOM_ICC_BUFF_LAST_KILL_RESET, lockoutResetTime);
+
+    uint8 level = GetIccBuffLevel();
+    if (level >= ICC_BUFF_LEVELS - 1)
+        return false;
+
+    ++level;
+    _iccBuffLevel = level;
+    setWorldState(WORLD_STATE_CUSTOM_ICC_BUFF_LEVEL, level);
+    return true;
 }
 
 // Setting a worldstate will save it to DB

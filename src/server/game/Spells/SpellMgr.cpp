@@ -32,8 +32,17 @@
 #include "SpellInfo.h"
 #include "Tokenize.h"
 #include "World.h"
+#include "WorldState.h"
 
 #include <algorithm>
+#include <array>
+
+namespace
+{
+    // Hellscream's Warsong and Strength of Wrynn, indexed by ICC buff level
+    constexpr std::array<uint32, ICC_BUFF_LEVELS> IccBuffHorde    = { 73816, 73818, 73819, 73820, 73821, 73822 };
+    constexpr std::array<uint32, ICC_BUFF_LEVELS> IccBuffAlliance = { 73762, 73824, 73825, 73826, 73827, 73828 };
+}
 
 bool IsPrimaryProfessionSkill(uint32 skill)
 {
@@ -1059,6 +1068,34 @@ SpellAreaForAreaMapBounds SpellMgr::GetSpellAreaForAreaMapBounds(uint32 area_id)
     return mSpellAreaForAreaMap.equal_range(area_id);
 }
 
+uint32 SpellMgr::GetActiveIccBuff(Player const* player) const
+{
+    if (!player)
+        return 0;
+
+    bool const horde = (player->getRaceMask() & ICC_RACEMASK_HORDE) != 0;
+    uint32 const configured = sWorld->getIntConfig(horde ? CONFIG_ICC_BUFF_HORDE : CONFIG_ICC_BUFF_ALLIANCE);
+    if (!configured || !sWorld->getBoolConfig(CONFIG_ICC_BUFF_PROGRESSIVE))
+        return configured;
+
+    uint8 const level = sWorldState->GetIccBuffLevel();
+    return horde ? IccBuffHorde[level] : IccBuffAlliance[level];
+}
+
+void SpellMgr::ApplyIccBuff(Unit* target, Player const* owner) const
+{
+    uint32 const buff = GetActiveIccBuff(owner);
+
+    // a resummoned pet can bring back an older level saved with its auras
+    for (auto const* levels : { &IccBuffHorde, &IccBuffAlliance })
+        for (uint32 spellId : *levels)
+            if (spellId != buff)
+                target->RemoveAurasDueToSpell(spellId);
+
+    if (buff && !target->HasAura(buff))
+        target->AddAura(buff, target);
+}
+
 bool SpellArea::IsFitToRequirements(Player const* player, uint32 newZone, uint32 newArea) const
 {
     if (gender != GENDER_NONE)                   // not in expected gender
@@ -1199,7 +1236,8 @@ bool SpellArea::IsFitToRequirements(Player const* player, uint32 newZone, uint32
         case 73828:
             if (player)
                 if (InstanceScript* s = const_cast<Player*>(player)->GetInstanceScript())
-                    return s->GetData(251 /*DATA_BUFF_AVAILABLE*/) != 0;
+                    return s->GetData(251 /*DATA_BUFF_AVAILABLE*/) != 0 &&
+                        spellId == sSpellMgr->GetActiveIccBuff(player);
             return false;
             break;
     }
@@ -2993,27 +3031,35 @@ void SpellMgr::LoadSpellAreas()
         ++count;
     } while (result->NextRow());
 
-    if (sWorld->getIntConfig(CONFIG_ICC_BUFF_HORDE) > 0)
+    auto addIccBuffArea = [&](uint32 spellId, uint32 raceMask)
     {
-        LOG_INFO("server.loading", ">> Using ICC Buff Horde: {}", sWorld->getIntConfig(CONFIG_ICC_BUFF_HORDE));
-        SpellArea spellAreaICCBuffHorde = { sWorld->getIntConfig(CONFIG_ICC_BUFF_HORDE), ICC_AREA, 0, 0, 0, ICC_RACEMASK_HORDE, Gender(2), 64, 11, 1 };
-        SpellArea const* saICCBuffHorde = &mSpellAreaMap.insert(SpellAreaMap::value_type(sWorld->getIntConfig(CONFIG_ICC_BUFF_HORDE), spellAreaICCBuffHorde))->second;
-        mSpellAreaForAreaMap.insert(SpellAreaForAreaMap::value_type(ICC_AREA, saICCBuffHorde));
+        SpellArea spellArea = { spellId, ICC_AREA, 0, 0, 0, raceMask, Gender(2), 64, 11, 1 };
+        SpellArea const* sa = &mSpellAreaMap.insert(SpellAreaMap::value_type(spellId, spellArea))->second;
+        mSpellAreaForAreaMap.insert(SpellAreaForAreaMap::value_type(ICC_AREA, sa));
         ++count;
-    }
-    else
-        LOG_INFO("server.loading", ">> ICC Buff Horde: disabled");
+    };
 
-    if (sWorld->getIntConfig(CONFIG_ICC_BUFF_ALLIANCE) > 0)
+    auto loadIccBuff = [&](char const* faction, uint32 configured, uint32 raceMask,
+        std::array<uint32, ICC_BUFF_LEVELS> const& levels)
     {
-        LOG_INFO("server.loading", ">> Using ICC Buff Alliance: {}", sWorld->getIntConfig(CONFIG_ICC_BUFF_ALLIANCE));
-        SpellArea spellAreaICCBuffAlliance = { sWorld->getIntConfig(CONFIG_ICC_BUFF_ALLIANCE), ICC_AREA, 0, 0, 0, ICC_RACEMASK_ALLIANCE, Gender(2), 64, 11, 1 };
-        SpellArea const* saICCBuffAlliance = &mSpellAreaMap.insert(SpellAreaMap::value_type(sWorld->getIntConfig(CONFIG_ICC_BUFF_ALLIANCE), spellAreaICCBuffAlliance))->second;
-        mSpellAreaForAreaMap.insert(SpellAreaForAreaMap::value_type(ICC_AREA, saICCBuffAlliance));
-        ++count;
-    }
-    else
-        LOG_INFO("server.loading", ">> ICC Buff Alliance: disabled");
+        if (!configured)
+            LOG_INFO("server.loading", ">> ICC Buff {}: disabled", faction);
+        else if (sWorld->getBoolConfig(CONFIG_ICC_BUFF_PROGRESSIVE))
+        {
+            // all levels are registered, IsFitToRequirements only lets the current one apply
+            LOG_INFO("server.loading", ">> ICC Buff {}: progressive", faction);
+            for (uint32 spellId : levels)
+                addIccBuffArea(spellId, raceMask);
+        }
+        else
+        {
+            LOG_INFO("server.loading", ">> Using ICC Buff {}: {}", faction, configured);
+            addIccBuffArea(configured, raceMask);
+        }
+    };
+
+    loadIccBuff("Horde", sWorld->getIntConfig(CONFIG_ICC_BUFF_HORDE), ICC_RACEMASK_HORDE, IccBuffHorde);
+    loadIccBuff("Alliance", sWorld->getIntConfig(CONFIG_ICC_BUFF_ALLIANCE), ICC_RACEMASK_ALLIANCE, IccBuffAlliance);
 
     LOG_INFO("server.loading", ">> Loaded {} Spell Area Requirements in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
     LOG_INFO("server.loading", " ");

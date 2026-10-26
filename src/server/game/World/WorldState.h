@@ -307,9 +307,16 @@ class WorldState
         void SetSunsReachCounter(SunsReachCounters index, uint32 value);
         void HandleSunwellGateTransition(uint32 newGate);
         void SetSunwellGateCounter(SunwellGateCounters index, uint32 value);
+        [[nodiscard]] uint8 GetIccBuffLevel() const { return _iccBuffLevel.load(std::memory_order_relaxed); }
+        // Returns true when the ICC buff level went up. Counts at most one kill per lockout.
+        bool CountIccLichKingKill(uint32 lockoutResetTime);
     private:
         typedef std::map<uint32, uint64> WorldStatesMap;
         WorldStatesMap _worldstates;
+        void InitIccBuffLevel();
+        // read from map threads on every ICC area check, so not looked up in _worldstates
+        std::atomic<uint8> _iccBuffLevel{0};
+        std::mutex _iccBuffMutex;
         void SendWorldstateUpdate(std::mutex& mutex, GuidVector const& guids, uint32 value, uint32 worldStateId);
         void StopSunsReachPhase(bool forward);
         void StartSunsReachPhase(bool initial = false);

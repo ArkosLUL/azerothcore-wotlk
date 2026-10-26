@@ -85,14 +85,7 @@ void Pet::AddToWorld()
     if (GetOwnerGUID().IsPlayer() && GetMapId() == MAP_ICECROWN_CITADEL && FindMap() && FindMap()->ToInstanceMap() && FindMap()->ToInstanceMap()->GetInstanceScript() && FindMap()->ToInstanceMap()->GetInstanceScript()->GetData(251 /*DATA_BUFF_AVAILABLE*/))
         if (Unit* owner = GetOwner())
             if (Player* plr = owner->ToPlayer())
-            {
-                SpellAreaForAreaMapBounds saBounds = sSpellMgr->GetSpellAreaForAreaMapBounds(4812);
-                for (SpellAreaForAreaMap::const_iterator itr = saBounds.first; itr != saBounds.second; ++itr)
-                    if ((itr->second->raceMask & plr->getRaceMask()) && !HasAura(itr->second->spellId))
-                        if (SpellInfo const* si = sSpellMgr->GetSpellInfo(itr->second->spellId))
-                            if (si->HasAura(SPELL_AURA_MOD_INCREASE_HEALTH_PERCENT))
-                                AddAura(itr->second->spellId, this);
-            }
+                sSpellMgr->ApplyIccBuff(this, plr);
 
     // Prevent stuck pets when zoning. Pets default to "follow" when added to world
     // so we'll reset flags and let the AI handle things

@@ -4743,6 +4743,8 @@ PlayerDump.DisallowOverwrite = 1
 #    ICC.Buff.Horde
 #        Description: Specify ICC buff
 #        Note:        It is necessary to restart the server after changing the values!
+#                     With ICC.Buff.Progressive = 1 these only turn a faction's buff on or off:
+#                     0 disables it, any other value enables it.
 #        Example:     | Spell IDs | Amount | Faction  |
 #                     |     73762 |     5% | Alliance |
 #                     |     73824 |    10% | Alliance |
@@ -4761,6 +4763,20 @@ PlayerDump.DisallowOverwrite = 1
 
 ICC.Buff.Alliance = 73828
 ICC.Buff.Horde    = 73822
+
+#
+#    ICC.Buff.Progressive
+#        Description: Grow the ICC buff with Lich King kills instead of using the fixed spells above.
+#                     It starts at 5% and goes up by 5% for each raid lockout in which the Lich King
+#                     is killed on the server (any difficulty, counted once per lockout), up to 30%.
+#                     The level is kept in characters.worldstates: entry 20009 holds the level
+#                     (0 = 5% ... 5 = 30%), entry 20010 the lockout of the last counted kill.
+#                     Edit them only while the server is stopped.
+#        Note:        It is necessary to restart the server after changing the value!
+#        Default:     1 - (Enabled)
+#                     0 - (Disabled, use ICC.Buff.Alliance and ICC.Buff.Horde)
+
+ICC.Buff.Progressive = 1
 
 #
 #    WipeGunshipBlizzlike.Enable

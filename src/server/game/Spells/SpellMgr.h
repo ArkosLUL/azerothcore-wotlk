@@ -517,7 +517,8 @@ enum ICCBuff
 {
     ICC_AREA              = 4812,
     ICC_RACEMASK_HORDE    =  690,
-    ICC_RACEMASK_ALLIANCE = 1101
+    ICC_RACEMASK_ALLIANCE = 1101,
+    ICC_BUFF_LEVELS       =    6  // 5% to 30% in 5% steps
 };
 
 struct SpellArea
@@ -737,6 +738,11 @@ public:
     [[nodiscard]] SpellAreaForQuestMapBounds GetSpellAreaForQuestEndMapBounds(uint32 quest_id) const;
     [[nodiscard]] SpellAreaForAuraMapBounds GetSpellAreaForAuraMapBounds(uint32 spell_id) const;
     [[nodiscard]] SpellAreaForAreaMapBounds GetSpellAreaForAreaMapBounds(uint32 area_id) const;
+
+    // ICC buff spell the player should have right now, 0 when that faction's buff is disabled
+    [[nodiscard]] uint32 GetActiveIccBuff(Player const* player) const;
+    // Gives a pet or summon its owner's current ICC buff level
+    void ApplyIccBuff(Unit* target, Player const* owner) const;
 
     // SpellInfo object management
     [[nodiscard]] SpellInfo const* GetSpellInfo(uint32 spellId) const { return spellId < GetSpellInfoStoreSize() ?  mSpellInfoMap[spellId] : nullptr; }
