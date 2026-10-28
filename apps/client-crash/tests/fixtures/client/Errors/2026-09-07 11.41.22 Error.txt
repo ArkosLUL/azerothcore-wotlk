@@ -1,0 +1,50 @@
+==============================================================================
+World of WarCraft (build 12340)
+
+Exe:      A:\Games\WoW\wow_loot32.exe
+Time:     Sep  7, 2026 11:41:22.436 AM
+User:     tester
+Computer: TESTPC
+------------------------------------------------------------------------------
+
+This application has encountered a critical error:
+
+ERROR #134 (0x85100086) Fatal Condition
+Program:	A:\Games\WoW\wow_loot32.exe
+
+
+
+
+WoWBuild: 12340
+Realm: AzerothCore [192.0.2.1:8085]
+Local Zone: Ulduar
+Local Player: Testchar, 000000000006A9B9, (2113.43,124.543,412.299)
+Current Object Track: Arachnopod Destroyer, F150008587000346, (2112.48,121.953,412.299)
+Total lua memory: 172741KB
+Add Ons: DBM-Core DBM-Ulduar Skada
+Settings:
+
+----------------------------------------
+    Stack Trace (Manual)
+----------------------------------------
+
+Showing 1/1 threads...
+
+--- Thread ID: 34424 [Current Thread] ---
+00772AB5 043FF9A0 0001:00371AB5 A:\Games\WoW\wow_loot32.exe
+008889CE 043FF9B0 0001:004879CE A:\Games\WoW\wow_loot32.exe
+006CEBA8 043FF9C4 0001:002CDBA8 A:\Games\WoW\wow_loot32.exe
+00589826 043FF9DC 0001:00188826 A:\Games\WoW\wow_loot32.exe
+
+----------------------------------------
+    Stack Trace (Using DBGHELP.DLL)
+----------------------------------------
+
+----------------------------------------
+    Loaded Modules
+----------------------------------------
+
+DBG-MODULE<00400000 009FE000 "wow_loot32.exe" "Wow.pdb" 0 {8805d059-f6a3-4565-a646aa69736d4efe} 1 1277448958>
+DBG-MODULE<776D0000 001BF000 "ntdll.dll" "wntdll.pdb" 0 {dbc4b305-3c0f-3189-895b2be009a0d2a4} 1 3379307211>
+
+------------------------------------------------------------------------------

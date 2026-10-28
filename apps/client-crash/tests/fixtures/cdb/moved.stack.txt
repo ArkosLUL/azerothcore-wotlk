@@ -1,0 +1,9 @@
+==STACK==
+ChildEBP RetAddr
+0019f6c0 0086a1b2     wow_loot64+0x1a2f0
+0019f6e0 0086a1c4     wow_loot64+0x46a1b2
+0019f700 00000000     ntdll!RtlUserThreadStart+0x2f
+==MODULES==
+start    end        module name
+00400000 00dfe000   wow_loot64 A:\Games\WoW\wow_loot64.exe
+==END==

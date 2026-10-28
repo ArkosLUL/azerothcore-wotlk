@@ -1,0 +1,46 @@
+==============================================================================
+World of WarCraft (build 12340)
+
+Exe:      A:\Games\WoW\wow.exe
+Time:     Jul 19, 2026 11:49:08.791 AM
+User:     tester
+Computer: TESTPC
+------------------------------------------------------------------------------
+
+This application has encountered a critical error:
+
+ERROR #132 (0x85100084) Fatal Exception
+Program:	A:\Games\WoW\wow.exe
+Exception:	0xC0000005 (ACCESS_VIOLATION) at 0023:1550CC35
+
+The instruction at "0x1550CC35" referenced memory at "0x728A300F".
+The memory could not be "read".
+
+
+WoWBuild: 12340
+Settings:
+
+----------------------------------------
+    Stack Trace (Manual)
+----------------------------------------
+
+Showing 1/1 threads...
+
+--- Thread ID: 32400 [Current Thread] ---
+1550CC35 03E0FAD4 0001:0003BC35 A:\Games\WoW\wow_optimize.dll
+004DC5FE 03E0FB80 0001:000DB5FE A:\Games\WoW\wow.exe
+0085651C 03E0FB9C 0001:0045551C A:\Games\WoW\wow.exe
+
+----------------------------------------
+    Stack Trace (Using DBGHELP.DLL)
+----------------------------------------
+
+----------------------------------------
+    Loaded Modules
+----------------------------------------
+
+DBG-MODULE<00400000 009FD000 "wow.exe" "Wow.pdb" 0 {8805d059-f6a3-4565-a646aa69736d4efe} 1 1277448958>
+DBG-MODULE<154D0000 0A725000 "wow_optimize.dll" "" 0 {00000000-0000-0000-0000000000000000} 0 1784331624>
+DBG-MODULE<77D70000 001BF000 "ntdll.dll" "wntdll.pdb" 0 {dbc4b305-3c0f-3189-895b2be009a0d2a4} 1 3379307211>
+
+------------------------------------------------------------------------------

@@ -1,0 +1,96 @@
+==============================================================================
+World of WarCraft (build 12340)
+
+Exe:      A:\Games\WoW\wow.exe
+Time:     Jun 13, 2026  8:13:12.066 PM
+User:     tester
+Computer: TESTPC
+------------------------------------------------------------------------------
+
+This application has encountered a critical error:
+
+ERROR #132 (0x85100084) Fatal Exception
+Program:	A:\Games\WoW\wow.exe
+Exception:	0xC0000005 (ACCESS_VIOLATION) at 0023:00524868
+
+The instruction at "0x00524868" referenced memory at "0x00000018".
+The memory could not be "read".
+
+
+WoWBuild: 12340
+Realm: AzerothCore [192.0.2.1:8085]
+Local Zone: Naxxramas
+Local Player: Unknown, 00000000000013F2, (3498.9,-2919.05,303.057)
+Total lua memory: 96949KB
+Current Addon: (null)
+Add Ons: AtlasLoot DBM-Core Skada
+Settings:
+SET locale "enUS"
+SET realmList "realm.example"
+
+----------------------------------------
+               GxInfo
+----------------------------------------
+GxApi: D3D9
+
+----------------------------------------
+    x86 Registers
+----------------------------------------
+
+EAX=00000000  EBX=00000000  ECX=00000000  EDX=00000000  ESI=00000001
+EDI=00D38B00  EBP=0480EE0C  ESP=0480EDF8  EIP=00524868  FLG=00010202
+
+
+----------------------------------------
+    Stack Trace (Manual)
+----------------------------------------
+
+Address  Frame    Logical addr  Module
+
+Showing 3/3 threads...
+
+--- Thread ID: 32536 [Current Thread] ---
+00524868 0480EE0C 0001:00123868 A:\Games\WoW\wow.exe
+00524900 0480EE14 0001:00123900 A:\Games\WoW\wow.exe
+006D91CE 0480FE50 0001:002D81CE A:\Games\WoW\wow.exe
+0063202E 0480FE74 0001:0023102E A:\Games\WoW\wow.exe
+77C8C75B 0480FFDC 0001:0006B75B C:\WINDOWS\SYSTEM32\ntdll.dll
+
+--- Thread ID: 5016 ---
+6052A1B0 03C0FB88 0001:00009DB0 A:\Games\WoW\d3d9.dll
+77C8C75B 03C0FFDC 0001:0006B75B C:\WINDOWS\SYSTEM32\ntdll.dll
+
+--- Thread ID: 7020 ---
+66381234 03D0FB88 0001:00000234 C:\ProgramData\obs-studio-hook\graphics-hook32.dll
+77C8C75B 03D0FFDC 0001:0006B75B C:\WINDOWS\SYSTEM32\ntdll.dll
+
+----------------------------------------
+    Stack Trace (Using DBGHELP.DLL)
+----------------------------------------
+
+Showing 3/3 threads...
+
+--- Thread ID: 32536 [Current Thread] ---
+00524868 wow.exe <unknown symbol>+0 (0x00000000,0x00000000,0x00000000,0x00000000)
+
+----------------------------------------
+    Loaded Modules
+----------------------------------------
+
+DBG-MODULE<00400000 009FD000 "wow.exe" "Wow.pdb" 0 {8805d059-f6a3-4565-a646aa69736d4efe} 1 1277448958>
+DBG-MODULE<10000000 00069000 "DivxDecoder.dll" "" 0 {00000000-0000-0000-0000000000000000} 0 1076466304>
+DBG-MODULE<14A50000 001F0000 "RTSSHooks.dll" "RTSSHooks.pdb" 0 {9287e4b8-8ca3-4799-8cc824f8bfc5be72} 1 1758962897>
+DBG-MODULE<60520000 003F1000 "d3d9.dll" "" 0 {00000000-0000-0000-0000000000000000} 0 1076466304>
+DBG-MODULE<66380000 00041000 "graphics-hook32.dll" "graphics-hook32.pdb" 0 {ac3ff014-e7a9-9fb4-c14be3db95ca7fe0} 1 1>
+DBG-MODULE<75700000 000F0000 "KERNEL32.DLL" "wkernel32.pdb" 0 {00000000-0000-0000-0000000000000000} 1 1>
+DBG-MODULE<77C20000 001C0000 "ntdll.dll" "wntdll.pdb" 0 {dbc4b305-3c0f-3189-895b2be009a0d2a4} 1 3379307211>
+
+----------------------------------------
+    Memory Dump
+----------------------------------------
+
+Code: 16 bytes starting at (EIP = 00524868)
+
+00524868: 8B 40 18 85 C0 74 0A 8B  48 08 89 4D FC 5D C3 CC  .@...t..H..M.]..
+
+------------------------------------------------------------------------------
