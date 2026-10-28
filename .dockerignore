@@ -8,6 +8,7 @@
 /env/user/*
 /.env*
 .idea
+/modules/*/.git
 !.gitkeep
 
 # do not ignore the ccache folder (used by the ci)

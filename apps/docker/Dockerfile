@@ -64,7 +64,7 @@ ARG CCACHE_LOGFILE=""
 
 RUN apt-get update                                                     \
     && apt-get install -y --no-install-recommends                         \
-        build-essential ccache libtool cmake-data ninja-build cmake clang    \
+        build-essential ccache libtool cmake-data ninja-build cmake clang rsync \
         git lsb-base curl unzip default-mysql-client openssl                  \
         default-libmysqlclient-dev libboost-all-dev libssl-dev libmysql++-dev \
         libreadline-dev zlib1g-dev libbz2-dev libncurses5-dev liblzma-dev  \
@@ -81,6 +81,9 @@ ARG CACHEBUST=1
 WORKDIR /azerothcore/build
 
 RUN --mount=type=cache,target=/ccache,sharing=locked \
+    # Keeps the Ninja build folder between builds, so a small edit only rebuilds what it touches.
+    # Change the id to start over from an empty folder.
+    --mount=type=cache,id=ac-build,target=/azerothcore/build,sharing=locked \
     # This may seem silly (and it is), but AzerothCore wants the git repo at
     # build time. The git repo is _huge_ and it's not something that really
     # makes sense to mount into the container, but this way we can let the build
@@ -88,7 +91,7 @@ RUN --mount=type=cache,target=/ccache,sharing=locked \
     # of git repo into the container.
     --mount=type=bind,target=/azerothcore/.git,source=.git \
     git config --global --add safe.directory /azerothcore \
-    && cmake /azerothcore \
+    && set -- \
        -G Ninja \
        -DCMAKE_INSTALL_PREFIX="/azerothcore/env/dist"  \
        -DAPPS_BUILD="all"                              \
@@ -102,8 +105,24 @@ RUN --mount=type=cache,target=/ccache,sharing=locked \
        -DCMAKE_CXX_COMPILER_LAUNCHER="ccache"          \
        -DCMAKE_C_COMPILER_LAUNCHER="ccache"            \
        -DBoost_USE_STATIC_LIBS="ON"                    \
+    # A new toolchain or other CMake options can't reuse the old objects, so start from an empty folder.
+    && stamp="$({ clang --version; dpkg-query -W; printf '%s\n' "$@"; } | sha256sum)" \
+    && if [ "$(cat .ac-build-stamp 2>/dev/null)" != "$stamp" ]; then \
+           find . -mindepth 1 -delete && printf '%s\n' "$stamp" > .ac-build-stamp; \
+       fi \
+    # COPY layers get reused by content with their old mtimes, so an undone edit can look older than its object.
+    # Mtimes come from a copy kept in the cache instead, which only changes with a file's content.
+    && rsync -rlc --delete --exclude=.git \
+       /azerothcore/CMakeLists.txt /azerothcore/conf /azerothcore/deps /azerothcore/src /azerothcore/modules \
+       .src-ref/ \
+    && rsync -rltc .src-ref/ /azerothcore/ \
+    && cmake /azerothcore "$@" \
     && cmake --build . --config "$CTYPE" -j $(($(nproc) + 1)) \
     && cmake --install . --config "$CTYPE"
+
+# The build folder is a cache mount, so copy back compile_commands.json and the generated headers its -I flags need.
+RUN --mount=type=cache,id=ac-build,target=/ac-build,sharing=locked \
+    cp /ac-build/compile_commands.json /ac-build/*.h /azerothcore/build/
 
 #############################
 # Base runtime for services #
