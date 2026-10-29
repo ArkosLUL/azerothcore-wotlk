@@ -47,12 +47,14 @@ def make_trace(folder, name, start, end):
     return path
 
 
-def make_freeze(errors, last_stack="first.stack.txt", detected="2026-10-28T21:21:00Z"):
-    folder = Path(errors) / "Hangs" / "2026-10-28 23.21.00 wow_loot64.exe"
+def make_freeze(errors, last_stack="first.stack.txt", detected="2026-10-28T21:21:00Z", kind=None,
+                outcome="game closed while frozen"):
+    folder = Path(errors) / "Hangs" / f"{detected[:19].replace('T', ' ').replace(':', '.')} wow_loot64.exe"
     folder.mkdir(parents=True)
+    kind_line = f"kind: {kind}\n" if kind else ""
     (folder / "freeze.txt").write_text(
-        f"exe: wow_loot64.exe\npid: 1234\ndetected_utc: {detected}\nfollow_ups: 3\n"
-        "outcome: game closed while frozen\n", encoding="ascii")
+        f"exe: wow_loot64.exe\npid: 1234\ndetected_utc: {detected}\n{kind_line}follow_ups: 3\n"
+        f"outcome: {outcome}\n", encoding="ascii")
     for name in ("mini-00.dmp", "mini-03.dmp", "full.dmp"):
         (folder / name).write_bytes(b"")
     shutil.copy(FIXTURES / "cdb" / "first.stack.txt", folder / "mini-00.stack.txt")
@@ -158,6 +160,13 @@ class FreezeTest(unittest.TestCase):
         self.assertFalse(event.stuck)
         self.assertEqual(str(event.last_frames[0]), "wow.exe+0x1A2F0")
 
+    def test_pause(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            event = report.parse_freeze(make_freeze(tmp, kind="pause", outcome="recovered after 7 s"), no_cdb,
+                                        windows_check)
+        self.assertEqual(event.kind, "pause")
+        self.assertEqual(event.info["outcome"], "recovered after 7 s")
+
     def test_no_debugger(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = make_freeze(tmp)
@@ -259,13 +268,24 @@ class CollectTest(unittest.TestCase):
         events = self.collect()
         groups = report.assign_groups(events)
         text = report.render(events, groups, SUMMER, self.client, self.traces)
-        self.assertIn("5 events: 3 crashes, 1 asserts, 1 freezes", text)
+        self.assertIn("5 events: 3 crashes, 1 asserts, 1 freezes, 0 pauses", text)
         self.assertIn("| G1 | crash | 2 |", text)
         self.assertIn("| 2026-07-19 11:49 | 08:49 | crash | wow.exe | wow_optimize.dll+0x3CC35 |", text)
         self.assertIn("wow.exe+0x1A2B3 (stuck)", text)
         detail = report.render_detail("G1", events, SUMMER)
         self.assertIn("# G1: 2 x crash", detail)
         self.assertIn("wow_optimize.dll+0x3CC35", detail)
+
+    def test_pause_groups_apart_from_freeze(self):
+        make_freeze(self.client / "Errors")
+        make_freeze(self.client / "Errors", detected="2026-10-28T22:00:00Z", kind="pause",
+                    outcome="recovered after 7 s")
+        events = self.collect()
+        groups = report.assign_groups(events)
+        caught = sorted((e.kind, e.group) for e in events if e.kind in report.CAUGHT_KINDS)
+        self.assertEqual(len({group for _, group in caught}), 2)
+        self.assertEqual([kind for kind, _ in caught], ["freeze", "pause"])
+        self.assertIn("1 freezes, 1 pauses", report.render(events, groups, SUMMER, self.client, self.traces))
 
     def test_main(self):
         out = io.StringIO()

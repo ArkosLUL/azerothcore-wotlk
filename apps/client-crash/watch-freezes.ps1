@@ -4,14 +4,16 @@
     crash.
 
 .DESCRIPTION
-    Once the client window has not answered for -FreezeSeconds, ProcDump writes a mini and a full dump,
-    then a mini dump every -FollowUpSeconds while the client stays frozen, up to -FollowUps more, then
-    the script beeps: from then on closing the game loses nothing. Each freeze gets a folder in
-    <client>\Errors\Hangs holding the dumps, a copy of the client's Logs folder and freeze.txt.
+    Once the client window has not answered for -FreezeSeconds, ProcDump writes a mini dump, then another
+    every -FollowUpSeconds while the window stays silent, up to -FollowUps more. If the window answers or
+    the game exits by then, that was a pause and the mini dumps are all it gets. Otherwise it is a freeze:
+    ProcDump writes a full dump and the script beeps, and from then on closing the game loses nothing.
+    Each pause or freeze gets a folder in <client>\Errors\Hangs holding the dumps, a copy of the client's
+    Logs folder and freeze.txt.
 
     When the game exits, the botobs traces overlapping each freeze or new client crash report, and the
     worldserver console log around it, are copied next to it, since traces age out after a few days.
-    Only the newest -Keep freeze folders and crash evidence folders are kept.
+    Only the newest -Keep freeze folders, pause folders and crash evidence folders are kept.
 
 .EXAMPLE
     .\watch-freezes.ps1 -Launch 'A:\WOW\world of warcraft 3.3.5a hd\wow_loot64.exe'
@@ -121,37 +123,45 @@ function Save-Freeze($Process, [IntPtr]$Window, [string]$ClientDir, [string]$Exe
     $detected = Get-Date
     $folder = Join-Path $ClientDir ('Errors\Hangs\{0:yyyy-MM-dd HH.mm.ss} {1}' -f $detected, $Exe)
     New-Item -ItemType Directory -Force -Path $folder | Out-Null
-    Write-Status "freeze detected, dumping into $folder"
+    Write-Status "no answer for $FreezeSeconds s, dumping into $folder"
 
     $null = Write-Dump $Process.Id '-mm' (Join-Path $folder 'mini-00.dmp')
-    if (-not (Write-Dump $Process.Id '-ma' (Join-Path $folder 'full.dmp'))) { Write-Status 'full dump failed' }
     Copy-Item -LiteralPath (Join-Path $ClientDir 'Logs') -Destination (Join-Path $folder 'Logs') -Recurse `
         -ErrorAction SilentlyContinue
 
     $taken = 0
+    $kind = 'freeze'
     for ($i = 1; $i -le $FollowUps; $i++) {
         Start-Sleep -Seconds $FollowUpSeconds
-        if ($Process.HasExited -or (Test-Responsive $Window 500)) { break }
+        if ($Process.HasExited -or (Test-Responsive $Window 500)) { $kind = 'pause'; break }
         if (Write-Dump $Process.Id '-mm' (Join-Path $folder ('mini-{0:D2}.dmp' -f $i))) { $taken++ }
     }
-    1..3 | ForEach-Object { [console]::Beep(880, 200) }
-    Write-Status "dumps done ($taken follow-ups), safe to close the game"
+    if ($kind -eq 'freeze') {
+        # the game is suspended while ProcDump writes this (8 s for 1.2 GB), so short pauses don't get one
+        if (-not (Write-Dump $Process.Id '-ma' (Join-Path $folder 'full.dmp'))) { Write-Status 'full dump failed' }
+        1..3 | ForEach-Object { [console]::Beep(880, 200) }
+        Write-Status "dumps done ($taken follow-ups), safe to close the game"
+    }
 
     $utc = $detected.ToUniversalTime()
     $note = @(
         "exe: $Exe",
         "pid: $($Process.Id)",
         ('detected_utc: {0:yyyy-MM-ddTHH:mm:ssZ}' -f $utc),
+        "kind: $kind",
         "freeze_seconds: $FreezeSeconds",
         "follow_ups: $taken"
     )
     Set-Content -LiteralPath (Join-Path $folder 'freeze.txt') -Value $note -Encoding ASCII
-    return [pscustomobject]@{ Folder = $folder; WhenUtc = $utc; Detected = $detected }
+    return [pscustomobject]@{ Folder = $folder; WhenUtc = $utc; Detected = $detected; Kind = $kind }
 }
 
 function Wait-FreezeOutcome($Process, [IntPtr]$Window, $Freeze) {
     while ($true) {
-        if ($Process.HasExited) { $outcome = 'game closed while frozen'; break }
+        if ($Process.HasExited) {
+            $outcome = if ($Freeze.Kind -eq 'freeze') { 'game closed while frozen' } else { 'game exited' }
+            break
+        }
         if (Test-Responsive $Window 500) {
             $seconds = ((Get-Date) - $Freeze.Detected).TotalSeconds + $FreezeSeconds
             $outcome = 'recovered after {0:N0} s' -f $seconds
@@ -222,14 +232,15 @@ function Remove-OldEvidence([string]$ClientDir) {
     $old = @()
     $hangs = Join-Path $errors 'Hangs'
     if (Test-Path -LiteralPath $hangs) {
-        # recovered stalls are pruned on their own, so a run of loading-screen stalls can't push out real freezes
+        # pauses and recovered freezes are pruned on their own, so a run of them can't push out real freezes
         $folders = Get-ChildItem -LiteralPath $hangs -Directory | Sort-Object Name -Descending
-        $recovered = @($folders | Where-Object {
-                Select-String -LiteralPath (Join-Path $_.FullName 'freeze.txt') -Pattern '^outcome: recovered' -Quiet `
+        $minorPattern = '^(kind: pause|outcome: recovered)'
+        $minor = @($folders | Where-Object {
+                Select-String -LiteralPath (Join-Path $_.FullName 'freeze.txt') -Pattern $minorPattern -Quiet `
                     -ErrorAction SilentlyContinue
             })
-        $real = @($folders | Where-Object { $recovered -notcontains $_ })
-        $old += @($real | Select-Object -Skip $Keep) + @($recovered | Select-Object -Skip $Keep)
+        $real = @($folders | Where-Object { $minor -notcontains $_ })
+        $old += @($real | Select-Object -Skip $Keep) + @($minor | Select-Object -Skip $Keep)
     }
     $old += @(Get-ChildItem -LiteralPath $errors -Directory -Filter '*.evidence' | Sort-Object Name -Descending |
             Select-Object -Skip $Keep)
@@ -268,7 +279,8 @@ function Watch-Game($Process) {
     }
     Write-Status "$exe exited"
 
-    $events = @($freezes | ForEach-Object { [pscustomobject]@{ Folder = $_.Folder; WhenUtc = $_.WhenUtc } })
+    $events = @($freezes | Where-Object { $_.Kind -eq 'freeze' } |
+            ForEach-Object { [pscustomobject]@{ Folder = $_.Folder; WhenUtc = $_.WhenUtc } })
     $reports = Get-ChildItem -LiteralPath (Join-Path $clientDir 'Errors') -Filter '*.txt' -ErrorAction SilentlyContinue
     $events += @($reports | Where-Object { $_.LastWriteTime -ge $started } |
             ForEach-Object {

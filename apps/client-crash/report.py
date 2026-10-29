@@ -2,7 +2,7 @@
 """Group WoW 3.3.5a client crashes and freezes and match each one to the botobs trace running then.
 
 Reads the client's own crash reports (Errors/*.txt), the Windows Error Reporting freeze records, and
-the freeze folders watch-freezes.ps1 writes (Errors/Hangs/*). Prints Markdown.
+the freeze and pause folders watch-freezes.ps1 writes (Errors/Hangs/*). Prints Markdown.
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ STOCK_CLIENT_DLLS = {
 }
 
 ERROR_KINDS = {"132": "crash", "134": "assert"}
+# what the catcher writes: a pause ended before the follow-up dumps did, a freeze outlasted them
+CAUGHT_KINDS = ("freeze", "pause")
 TRACE_SLACK = dt.timedelta(minutes=2)
 WER_LOOKBACK = dt.timedelta(minutes=15)
 WER_MERGE = dt.timedelta(minutes=15)
@@ -336,7 +338,8 @@ def parse_freeze(folder: Path, cdb_lookup, windows_check=is_windows_module) -> E
         return None
     when = dt.datetime.strptime(meta["detected_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     exe = meta.get("exe", "?")
-    event = Event(kind="freeze", when=when, exe=exe, source=folder, evidence=folder)
+    kind = "pause" if meta.get("kind") == "pause" else "freeze"
+    event = Event(kind=kind, when=when, exe=exe, source=folder, evidence=folder)
     for key in ("outcome", "follow_ups"):
         if meta.get(key):
             event.info[key] = meta[key]
@@ -393,8 +396,8 @@ def match_traces(event: Event, traces: list[Trace]) -> list[Trace]:
 
 
 def merge_wer_freezes(events: list[Event]) -> list[Event]:
-    """A Windows freeze record logged after a caught freeze describes the same freeze."""
-    folders = [e for e in events if e.kind == "freeze" and e.precise]
+    """A Windows freeze record logged after a caught freeze or pause describes the same event."""
+    folders = [e for e in events if e.kind in CAUGHT_KINDS and e.precise]
     kept = []
     for event in events:
         if event.kind == "freeze" and not event.precise:
@@ -411,7 +414,7 @@ def merge_wer_freezes(events: list[Event]) -> list[Event]:
 def group_key(event: Event):
     if event.kind == "crash" and event.where:
         return ("crash", event.where)
-    if event.kind in ("assert", "freeze") and event.frames:
+    if event.kind in ("assert", *CAUGHT_KINDS) and event.frames:
         return (event.kind, tuple(str(f) for f in event.frames[:3]))
     return None
 
@@ -514,11 +517,12 @@ def kind_label(event: Event) -> str:
 
 def render(events: list[Event], groups: list[list[Event]], tz: dt.tzinfo | None, client: Path,
            traces_dir: Path) -> str:
-    counts = {k: sum(1 for e in events if e.kind == k) for k in ("crash", "assert", "freeze")}
+    counts = {k: sum(1 for e in events if e.kind == k) for k in ("crash", "assert", "freeze", "pause")}
     offset = to_local(dt.datetime.now(UTC), tz).strftime("%z")
     out = ["# Client crashes and freezes", ""]
     out.append(f"Client: `{client}`. {len(events)} events: {counts['crash']} crashes, {counts['assert']} asserts, "
-               f"{counts['freeze']} freezes. Times are local (UTC{offset[:3]}:{offset[3:]} now).")
+               f"{counts['freeze']} freezes, {counts['pause']} pauses. "
+               f"Times are local (UTC{offset[:3]}:{offset[3:]} now).")
     if not traces_dir.is_dir():
         out.append(f"Trace folder `{traces_dir}` not found, so only saved traces are matched.")
     out += ["", "## Groups", "",
@@ -558,7 +562,7 @@ def render_detail(label: str, events: list[Event], tz: dt.tzinfo | None) -> str:
             out.append(f"- Windows record: `{e.wer}`")
         if e.evidence and e.evidence != e.source:
             out.append(f"- Evidence: `{e.evidence}`")
-        if e.kind == "freeze" and e.dumps:
+        if e.kind in CAUGHT_KINDS and e.dumps:
             out.append(f"- Dumps: {', '.join(d.name for d in e.dumps)}")
         else:
             out += [f"- Dump: `{dump}`" for dump in e.dumps]
@@ -567,7 +571,7 @@ def render_detail(label: str, events: list[Event], tz: dt.tzinfo | None) -> str:
         for trace in e.traces:
             out.append(f"- Trace: {fmt_trace(trace, tz)} `{trace.path}`")
         if e.frames:
-            title = "Main thread, first dump" if e.kind == "freeze" else "Faulting thread"
+            title = "Main thread, first dump" if e.kind in CAUGHT_KINDS else "Faulting thread"
             out += ["", f"{title}:", "", "```", *(str(f) for f in e.frames), "```"]
         if e.last_frames:
             out += ["", "Main thread, last dump:", "", "```", *(str(f) for f in e.last_frames), "```"]

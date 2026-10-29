@@ -39,24 +39,28 @@ is already running, and with neither option it waits for any 3.3.5 client and wa
 What it does:
 
 - Arms 30 s after launch (`-ArmAfterSeconds`), so loading the data files at startup doesn't count.
-- Calls a freeze when the window ignores a no-op message for 5 s (`-FreezeSeconds`). This is the test
+- Starts dumping when the window ignores a no-op message for 5 s (`-FreezeSeconds`). This is the test
   behind Windows' "not responding".
-- Writes a mini dump and a full dump at once, then a mini dump every 2 s while the window stays frozen,
-  up to 8 more (`-FollowUpSeconds`, `-FollowUps`), then beeps three times. After the beep, closing the game
-  loses nothing.
-- Puts everything in `Errors\Hangs\<date time> <exe>\`: `mini-00.dmp`, `full.dmp`, `mini-01.dmp`..., a copy
-  of `Logs\`, `procdump.log`, and `freeze.txt` with the detection time (UTC) and the outcome:
-  `game closed while frozen` or `recovered after N s`.
+- Writes a mini dump, then another every 2 s while the window stays silent, up to 8 more
+  (`-FollowUpSeconds`, `-FollowUps`).
+- If the window answers or the game exits before the last of those, it was a **pause**: the mini dumps are
+  all it gets. Otherwise it is a **freeze**: it writes a full dump and beeps three times, about 21 s plus
+  the full dump's time into it. After the beep, closing the game loses nothing.
+- Puts everything in `Errors\Hangs\<date time> <exe>\`: `mini-00.dmp`, `mini-01.dmp`..., `full.dmp`, a copy
+  of `Logs\`, `procdump.log`, and `freeze.txt` with the detection time (UTC), the kind (`pause` or
+  `freeze`) and the outcome: `recovered after N s`, `game exited` (a pause) or `game closed while frozen`.
 - Once the game has exited, saves the server side next to every freeze and every new client crash report
   (`Errors\<report name>.evidence\` for those): `worldserver.log` holds `docker logs ac-worldserver` from
   5 min before to 1 min after, and `traces\` the botobs traces overlapping the last 15 min. It waits
   until a minute after the event if needed. Botobs traces age out after 4-5 days, so this copy is often the
   only one left by the time someone looks.
-- Keeps the newest 5 freeze folders and 5 crash evidence folders (`-Keep`). Recovered stalls are counted
-  apart from real freezes, so a run of loading-screen stalls can't push the real ones out.
+- Keeps the newest 5 freeze folders and 5 crash evidence folders (`-Keep`). Pauses and recovered freezes are
+  counted apart, so a run of them can't push the real freezes out.
 
-Measured at the login screen: a mini dump is about 14 MB and takes 0.2 s, a full dump about 0.8 GB and 3.6 s.
-In a raid the full dump grows with the client's memory, up to a few GB.
+The client is suspended while ProcDump writes a dump. A mini dump is about 14 MB and takes 0.2 s. A full dump
+was 0.8 GB and 3.6 s at the login screen and 1.2-1.3 GB and 8 s in the world, and grows with the client's
+memory in a raid, up to a few GB. That is why only a freeze gets one: written at the start, it stretched every
+pause by 8 s.
 
 ### Traps
 
@@ -76,20 +80,20 @@ python apps\client-crash\report.py --client "<client>" [--since YYYY-MM-DD] [--d
 ```
 
 `--client` defaults to `WOW_CLIENT_DIR`. The report reads the client's reports, the WER records of this client
-(build 3.3.5, program path inside `--client`), and the freeze folders. It prints two Markdown tables:
+(build 3.3.5, program path inside `--client`), and the freeze and pause folders. It prints two Markdown tables:
 
-- **Groups**: crashes with the same faulting `module+offset`, and asserts or caught freezes with the same top
-  three frames, labelled G1, G2... by count. Offsets are relative to the module base, so a DLL loaded at a
-  different address each run still lands in one group. `wow.exe`, `wow_loot32.exe` and `wow_loot64.exe`
+- **Groups**: crashes with the same faulting `module+offset`, and asserts, caught freezes or pauses with the
+  same kind and top three frames, labelled G1, G2... by count. Offsets are relative to the module base, so a
+  DLL loaded at a different address each run still lands in one group. `wow.exe`, `wow_loot32.exe` and `wow_loot64.exe`
   all count as `wow.exe`, since the loot patch adds a section without moving any code.
-- **Events**: one row per crash, assert or freeze, in local time and UTC, with the zone and player when the
+- **Events**: one row per crash, assert, freeze or pause, in local time and UTC, with the zone and player when the
   client recorded them, and the botobs traces running then as `map/difficulty boss start-end`.
 
 `--detail G<n>` prints every event of one group: the full faulting-thread stack, addons, Lua memory, dumps,
 saved evidence, and third-party modules. Third-party means not shipped with Windows (System32, SysWOW64,
 the driver store, Defender) and not part of a stock client.
 
-For a caught freeze the report runs the x86 `cdb.exe` from the WinDbg app (found through
+For a caught freeze or pause the report runs the x86 `cdb.exe` from the WinDbg app (found through
 `Get-AppxPackage Microsoft.WinDbg`, else `--cdb`) on the first and last mini dump. It reads thread 0, which
 is the client's main thread: its bottom frames match the main thread in the client's own crash reports.
 If the top frame is the same in both dumps, the freeze is marked `stuck`, otherwise `moving`.
@@ -98,12 +102,19 @@ The cdb output is cached as `mini-NN.stack.txt` next to the dump. A freeze witho
 
 Traces match a crash or caught freeze within 2 min of the pull's start and end. A Windows-only freeze
 record is written when the window gets closed, possibly minutes into the freeze, so it matches every pull
-of the 15 min before. A Windows record within 15 min after a caught freeze of the same exe is folded into it.
+of the 15 min before. A Windows record within 15 min after a caught freeze or pause of the same exe is folded
+into it.
 
 Symbols for the game-folder `d3d9.dll` are the nearest export (`Direct3DCreate9On12Ex+0x...`), not real
 function names.
 
-## Known groups (2026-10-29)
+## Known groups (2026-10-30)
+
+- **Session-end pause**, whenever the client's server connection closes: a server restart, a kick (the AFK
+  kick too), or quitting the game. The main thread sits in `wow.exe+0x46B28D` (a `Sleep` wrapper) called from
+  `wow.exe+0x47DF79`. That function, starting at `wow.exe+0x47DED0`, closes every connection, checks every
+  100 ms whether they have all closed, and destroys what is left after 20 tries. With the teardown around it,
+  the window stays silent for more than 5 s. Harmless, and the reason pauses get no full dump.
 
 - **10 crashes, 9-16 Jun**, at `wow.exe+0x124868` reading `0x18`: a null pointer read in wow.exe, all in
   Naxxramas. None since 16 Jun.
