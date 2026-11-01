@@ -111,6 +111,18 @@ class ClientReportTest(unittest.TestCase):
         self.assertEqual(event.where, "wow.exe+0x124868")
         self.assertEqual(len(event.frames), 5)
 
+    def test_full_dump_in_evidence(self):
+        source = FIXTURES / "client" / "Errors" / "2026-06-13 20.13.12 Crash.txt"
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / source.name
+            shutil.copy(source, copy)
+            evidence = Path(tmp) / "2026-06-13 20.13.12 Crash.evidence"
+            evidence.mkdir()
+            (evidence / "full.dmp").write_bytes(b"")
+            event = report.parse_client_report(copy, SUMMER, windows_check)
+        self.assertEqual(event.evidence, evidence)
+        self.assertEqual([d.name for d in event.dumps], ["full.dmp"])
+
 
 class WerTest(unittest.TestCase):
     def test_filetime(self):

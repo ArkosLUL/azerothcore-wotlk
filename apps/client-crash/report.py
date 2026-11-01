@@ -213,6 +213,8 @@ def parse_client_report(path: Path, tz: dt.tzinfo | None, windows_check=is_windo
     evidence = path.with_name(path.stem + ".evidence")
     if evidence.is_dir():
         event.evidence = evidence
+        # the catcher's full dump, taken while the client's error box was still open
+        event.dumps += sorted(evidence.glob("*.dmp"))
     return event
 
 

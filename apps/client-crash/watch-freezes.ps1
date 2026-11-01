@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Dumps the WoW 3.3.5a client when it freezes, and saves the server-side evidence for every freeze or
-    crash.
+    Dumps the WoW 3.3.5a client when it freezes or crashes, and saves the server-side evidence for every
+    freeze or crash.
 
 .DESCRIPTION
     Once the client window has not answered for -FreezeSeconds, ProcDump writes a mini dump, then another
@@ -10,6 +10,11 @@
     ProcDump writes a full dump and the script beeps, and from then on closing the game loses nothing.
     Each pause or freeze gets a folder in <client>\Errors\Hangs holding the dumps, a copy of the client's
     Logs folder and freeze.txt.
+
+    On a crash the client writes Errors\<time> Crash.txt (Error.txt on an assert), then shows an error box
+    until OK is clicked. The box keeps the window answering, so it never counts as a freeze. When such a
+    report appears while the game still runs, ProcDump writes a full dump into <report>.evidence next to it,
+    with a copy of the Logs folder, and the script beeps.
 
     When the game exits, the botobs traces overlapping each freeze or new client crash report, and the
     worldserver console log around it, are copied next to it, since traces age out after a few days.
@@ -173,6 +178,28 @@ function Wait-FreezeOutcome($Process, [IntPtr]$Window, $Freeze) {
     Write-Status $outcome
 }
 
+function Get-NewReports([string]$ClientDir, [datetime]$Since) {
+    Get-ChildItem -LiteralPath (Join-Path $ClientDir 'Errors') -Filter '*.txt' -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $Since }
+}
+
+function Save-CrashDump($Process, [string]$ClientDir, $Report) {
+    $folder = Join-Path $Report.DirectoryName ($Report.BaseName + '.evidence')
+    New-Item -ItemType Directory -Force -Path $folder | Out-Null
+    Write-Status "client wrote $($Report.Name), dumping into $folder"
+    # the handler writes its own small .dmp right after the .txt
+    Start-Sleep -Seconds 2
+    if ($Process.HasExited) {
+        Write-Status 'game exited before the full dump'
+        return
+    }
+    if (-not (Write-Dump $Process.Id '-ma' (Join-Path $folder 'full.dmp'))) { Write-Status 'full dump failed' }
+    Copy-Item -LiteralPath (Join-Path $ClientDir 'Logs') -Destination (Join-Path $folder 'Logs') -Recurse `
+        -ErrorAction SilentlyContinue
+    1..3 | ForEach-Object { [console]::Beep(880, 200) }
+    Write-Status 'dump done, click OK on the error box (it may be behind the game window)'
+}
+
 function Save-ServerLog([string]$Folder, [datetime]$WhenUtc) {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         Write-Status 'docker not found, no server log saved'
@@ -256,11 +283,15 @@ function Watch-Game($Process) {
     if (-not $clientDir) { $clientDir = Split-Path -Parent $Process.Path }
     $started = $Process.StartTime
     $freezes = New-Object System.Collections.ArrayList
+    $crashes = New-Object 'System.Collections.Generic.HashSet[string]'
     $armed = $false
     Write-Status "watching $exe (pid $($Process.Id))"
 
     while (-not $Process.HasExited) {
         Start-Sleep -Seconds 1
+        foreach ($report in @(Get-NewReports $clientDir $started)) {
+            if ($crashes.Add($report.FullName)) { Save-CrashDump $Process $clientDir $report }
+        }
         $window = Get-GameWindow $Process
         if ($window -eq [IntPtr]::Zero) { continue }
         if (-not $armed) {
@@ -281,8 +312,7 @@ function Watch-Game($Process) {
 
     $events = @($freezes | Where-Object { $_.Kind -eq 'freeze' } |
             ForEach-Object { [pscustomobject]@{ Folder = $_.Folder; WhenUtc = $_.WhenUtc } })
-    $reports = Get-ChildItem -LiteralPath (Join-Path $clientDir 'Errors') -Filter '*.txt' -ErrorAction SilentlyContinue
-    $events += @($reports | Where-Object { $_.LastWriteTime -ge $started } |
+    $events += @(Get-NewReports $clientDir $started |
             ForEach-Object {
                 [pscustomobject]@{
                     Folder  = Join-Path $_.DirectoryName ($_.BaseName + '.evidence')
