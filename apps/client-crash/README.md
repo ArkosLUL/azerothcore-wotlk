@@ -128,18 +128,11 @@ function names.
 - **5 asserts, 6-7 Sep**, in Ulduar while the loot patcher was being tested. The 7 Sep pair fails in the loot
   record accessors (`0x6CEB80`-`0x6CEC70`, third frame `wow.exe+0x2CEBA8`); the 6 Sep three in
   `wow.exe+0x2DC7D3`.
-- **2 crashes, 23 Sep (Hodir) and 2 Nov (Anub'arak)**, at `wow.exe+0x4E47C2` reading `0x8`: a broken list
-  in the FMOD Ex sound library built into wow.exe (its strings name `fmod_soundgroupi.cpp` and the like).
-  FMOD's system object (pointer at `wow.exe+0x943800`) keeps two rings of sound groups: groups with a sound
-  playing, headed at `+0x7DA0`, and idle ones at `+0x7DAC`. Every frame the main loop calls FMOD's update
-  (`wow.exe+0x4D1450` to `0x4D3230`), which walks the playing ring, counts each group's playing sounds
-  (`wow.exe+0x4E47A0`) and moves groups with none to the idle ring. In the 2 Nov full dump the two rings had
-  merged into one, so the walk ran past the last playing group onto the idle head, read it as a group and
-  hit its empty sound list. The likely cause is a race: `wow.exe+0x4E1AC0`, which puts a sound into its
-  group, holds a lock (`wow.exe+0x94E9AC`) while it moves the sound, but moves the group onto the playing
-  ring after releasing it. If that runs on an FMOD loader thread while the main thread's update moves
-  groups, the rings can cross-link. A client patch could end the walk at the idle head as well. If a caught
-  freeze shows the main thread looping in `wow.exe+0x4D3250`-`0x4D32B5`, suspect the same bug.
+- **2 crashes, 23 Sep (Hodir) and 2 Nov (Anub'arak)**, at `wow.exe+0x4E47C2` reading `0x8`: FMOD's two
+  sound-group lists cross-linked by FMOD's background loader thread and the main thread moving groups at
+  once. Fixed by `apps/client-patcher/wow_fmod_patch.py`, whose README has the cause; `wow_loot64.exe` is
+  patched since 2 Nov. The same crash on a patched client means another thread moves groups. If a caught
+  freeze shows the main thread looping in `wow.exe+0x4D3250`-`0x4D32B5`, suspect these lists too.
 - **3 single crashes**, unexplained: 25 May `wow.exe+0x41D559`, 21 Jun in `ntdll`, 16 Oct `wow.exe+0x39ABB5`.
 - **11 freezes, Jun-Oct**, WER records only. Of the three in October, 21 Oct and 28 Oct 23:21 happened during
   ToC pulls, and 28 Oct 21:18 with no traced raid pull.

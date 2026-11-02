@@ -1,7 +1,7 @@
 # Client patcher
 
-Binary patches for the WoW 3.3.5a (build 12340) client, for server features the stock client
-cannot support.
+Binary patches for the WoW 3.3.5a (build 12340) client: server features the stock client cannot
+support, and fixes for client crashes.
 
 ## wow_loot_patch.py: raise the loot window above 18 slots
 
@@ -122,3 +122,59 @@ detects them and refuses to patch on top; patch the unpatched original again ins
 - The PE checksum is not recalculated. Windows does not verify it for a normal user-mode
   program, and it is already stale on any client patched by anything else.
 - Test with a debugger attached the first time, so a fault stops somewhere useful.
+
+## wow_fmod_patch.py: fix the sound-group crash
+
+Fixes `ERROR #132` at `wow.exe+0x4E47C2` reading `0x00000008`, a crash in the FMOD Ex sound library
+built into wow.exe. It hit on 23 Sep and 2 Nov 2026, both in raids full of spell sounds. Addresses
+below are absolute, so that crash is at `0x8E47C2`.
+
+### Why the client crashes
+
+FMOD's system object (pointer at `0xD43800`) keeps every sound group on one of two rings: groups with a
+sound playing, headed at `+0x7DA0`, and idle ones at `+0x7DAC`. Every frame `0x8D3230` walks the playing
+ring, counts each group's playing sounds, mutes extras over the group's audible limit, and moves groups
+with none to the idle ring. Starting a sound (`0x8E029E`) moves its group to the playing ring.
+
+`SoundI::setSoundGroup` (`0x8E1AC0`) puts a sound into a group under FMOD's sound list lock
+(`[0xD4E9AC]`), then moves the group to the playing ring after leaving the lock. FMOD's
+`FMOD thread for FMOD_NONBLOCKING`, which loads sounds in the background, calls it for every sound it
+loads, always with the master group (`system+0x7D9C`). Nothing on the main thread takes that lock
+when it moves groups, so the two threads sometimes move neighbouring groups at once and cross-link
+the rings. A later frame's walk then follows a link from the playing ring onto the idle ring's head,
+reads it as a group, and crashes on its empty sound list. The full dump of the 2 Nov crash shows
+exactly that: four spell-sound groups linked from the playing head straight into the idle head.
+
+### What it changes: 2 sites, both in `setSoundGroup`
+
+| Site | Before | After |
+|---|---|---|
+| `0x8E1B12` | links the sound's list entry, then stores which sound it belongs to | stores the sound first |
+| `0x8E1B44` | moves the group to the playing ring | the same, except for the master group |
+
+The master group has no audible limit (`-1`, behaviour "fail"), so whether it sits on the playing
+ring changes nothing the walk does, and starting one of its sounds still moves it there. Every sound
+plays exactly as before. The loader thread no longer touches the rings at all; its only remaining
+write is the sound list insert, which already runs under the lock. The first site closes a smaller
+gap in that insert: the main thread reads group sound lists without the lock, and could see the new
+entry before its sound was set. Both sites are rewritten in place, so the file size and every other
+byte stay the same.
+
+Checked on 2 Nov 2026 with cdb attached to a patched client in play: the loader thread took the new
+master group branch, and every other group move ran on the main thread.
+
+### Usage
+
+```
+python apps/client-patcher/wow_fmod_patch.py <path-to-wow.exe> [--dry-run] [--output PATH]
+```
+
+- `--dry-run` shows both sites with their before and after bytes and writes nothing.
+- Patching in place creates `<exe>.bak` first, unless `--no-backup` is given.
+- Re-running on a patched client is a no-op.
+
+The whole function is matched as one byte pattern, with only the lock's address and the two lock
+call targets left open. The lock address must be the same in both places. The patcher refuses the
+file unless it is a build 12340 client holding exactly one copy of the function, patched or not.
+wow.exe and the loot-patched copies hold identical bytes here, and the two patchers can run in
+either order.
