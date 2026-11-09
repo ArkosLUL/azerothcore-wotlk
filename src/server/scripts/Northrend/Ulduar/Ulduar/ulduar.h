@@ -360,6 +360,7 @@ enum UlduarPersistentData
     PERSISTENT_DATA_ALGALON_FIRST_PULL,
     // Set when Brann's action list unlocks the salvaged vehicles, they stay boardable for the rest of the lockout
     PERSISTENT_DATA_LEVIATHAN_VEHICLES_USABLE,
+    PERSISTENT_DATA_ALGALON_DEADLINE,
     MAX_PERSISTENT_DATA
 };
 
@@ -418,9 +419,9 @@ enum UlduarMisc
     ACTION_DESPAWN_ALGALON                  = 2,
     ACTION_START_INTRO                      = 3,
 
-    ALGALON_DESPAWN_TIMER_MINUTES           = 300,
+    TIMER_ALGALON_MINUTES                   = 300,
 
-    // Share PERSISTENT_DATA_ALGALON_TIMER with the minutes left, keep them above ALGALON_DESPAWN_TIMER_MINUTES
+    // Share PERSISTENT_DATA_ALGALON_TIMER with the minutes left, keep them above TIMER_ALGALON_MINUTES
     TIMER_ALGALON_DEFEATED                  = 3000,
     TIMER_ALGALON_TO_SUMMON                 = 2000,
     TIMER_ALGALON_SUMMONED                  = 1000,
