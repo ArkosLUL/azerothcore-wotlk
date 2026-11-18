@@ -24,6 +24,12 @@
 
 using namespace Acore::ChatCommands;
 
+enum GroupCommandSpells
+{
+    SPELL_EXHAUSTION = 57723,
+    SPELL_SATED      = 57724
+};
+
 class group_commandscript : public CommandScript
 {
 public:
@@ -39,6 +45,7 @@ public:
             { "disband",  HandleGroupDisbandCommand,  rbac::RBAC_PERM_COMMAND_GROUP_DISBAND,  Console::No },
             { "revive",   HandleGroupReviveCommand,   rbac::RBAC_PERM_COMMAND_GROUP_REVIVE,   Console::No },
             { "cooldown", HandleGroupCooldownCommand, rbac::RBAC_PERM_COMMAND_GROUP_COOLDOWN, Console::No },
+            { "sated",    HandleGroupSatedCommand,    rbac::RBAC_PERM_COMMAND_GROUP_SATED,    Console::No },
             { "leader",   HandleGroupLeaderCommand,   rbac::RBAC_PERM_COMMAND_GROUP_LEADER,   Console::No },
             { "invites",  HandleGroupInvitesCommand,  rbac::RBAC_PERM_COMMAND_GROUP_INVITES,  Console::No }
         };
@@ -295,7 +302,8 @@ public:
         return true;
     }
 
-    static bool HandleGroupCooldownCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
+    template <typename Action>
+    static bool ForEachGroupMember(ChatHandler* handler, Optional<PlayerIdentifier> target, Action&& action)
     {
         if (!target)
         {
@@ -307,29 +315,48 @@ public:
             return false;
         }
 
-        Player* targetPlayer = target->GetConnectedPlayer();
-        Group* group = targetPlayer->GetGroup();
-        std::string nameLink = handler->playerLink(target->GetName());
-
+        Group* group = target->GetConnectedPlayer()->GetGroup();
         if (!group)
         {
-            handler->SendErrorMessage(LANG_NOT_IN_GROUP, nameLink);
+            handler->SendErrorMessage(LANG_NOT_IN_GROUP, handler->playerLink(target->GetName()));
             return false;
         }
 
         for (GroupReference* it = group->GetFirstMember(); it != nullptr; it = it->next())
         {
-            Player* member = it->GetSource();
-            if (!member)
+            if (Player* member = it->GetSource())
             {
-                continue;
+                action(member);
             }
-
-            member->RemoveAllSpellCooldown();
-            handler->PSendSysMessage(LANG_REMOVEALL_COOLDOWN, handler->GetNameLink(member));
         }
 
         return true;
+    }
+
+    static bool HandleGroupCooldownCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
+    {
+        return ForEachGroupMember(handler, target, [handler](Player* member)
+        {
+            member->RemoveAllSpellCooldown();
+            handler->PSendSysMessage(LANG_REMOVEALL_COOLDOWN, handler->GetNameLink(member));
+        });
+    }
+
+    static bool HandleGroupSatedCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
+    {
+        return ForEachGroupMember(handler, target, [handler](Player* member)
+        {
+            member->RemoveAurasDueToSpell(SPELL_SATED);
+            member->RemoveAurasDueToSpell(SPELL_EXHAUSTION);
+
+            for (Unit* controlled : member->m_Controlled)
+            {
+                controlled->RemoveAurasDueToSpell(SPELL_SATED);
+                controlled->RemoveAurasDueToSpell(SPELL_EXHAUSTION);
+            }
+
+            handler->PSendSysMessage("Removed Sated and Exhaustion from {}.", handler->GetNameLink(member));
+        });
     }
 
     // Enable/disable accepting group invites

@@ -709,6 +709,7 @@ enum RBACPermissions
     RBAC_PERM_COMMAND_ACCOUNT_INFO                           = 945,
     RBAC_PERM_COMMAND_GROUP_COOLDOWN                         = 946,
     // custom permissions 1000+
+    RBAC_PERM_COMMAND_GROUP_SATED                            = 1000,
     RBAC_PERM_MAX
 };
 
